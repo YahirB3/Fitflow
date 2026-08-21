@@ -518,6 +518,24 @@ export default function App() {
     }
   };
 
+  const pickProfileImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      setProfile((current) => ({
+        ...current,
+        avatarUrl: result.assets[0].uri,
+        updatedAt: new Date().toISOString(),
+      }));
+      setProfileMessage('Imagen seleccionada. Guarda el perfil para conservarla.');
+    }
+  };
+
   const saveCustomRoutine = async () => {
     const safeRoutine = normalizeRoutine(editorRoutine, routine);
     setCustomRoutine(safeRoutine);
@@ -793,9 +811,16 @@ export default function App() {
         {activeScreen === 'profile' ? (
           <View style={styles.profileGrid}>
             <View style={styles.profileHero}>
-              <View style={styles.profileAvatar}>
-                <Text style={styles.profileAvatarText}>{profile.name.trim().charAt(0).toUpperCase() || 'F'}</Text>
-              </View>
+              <Pressable onPress={() => void pickProfileImage()} style={styles.profileAvatarButton}>
+                {profile.avatarUrl ? (
+                  <Image source={{ uri: profile.avatarUrl }} style={styles.profileAvatar} resizeMode="cover" />
+                ) : (
+                  <View style={styles.profileAvatar}>
+                    <Text style={styles.profileAvatarText}>{profile.name.trim().charAt(0).toUpperCase() || 'F'}</Text>
+                  </View>
+                )}
+                <Text style={styles.profileAvatarAction}>Cambiar</Text>
+              </Pressable>
               <View style={styles.profileHeroCopy}>
                 <Text style={styles.eyebrow}>PERFIL PERSONAL</Text>
                 <Text style={styles.profileHeroTitle}>{profile.name || 'Tu perfil FitFlow'}</Text>
@@ -1507,6 +1532,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
+  },
+  profileAvatarButton: {
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  profileAvatarAction: {
+    color: '#7ed8ff',
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 6,
   },
   profileAvatarText: {
     color: '#18242a',

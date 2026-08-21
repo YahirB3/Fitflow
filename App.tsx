@@ -21,7 +21,10 @@ import {
   saveCustomRoutine as saveRoutineToStorage,
   saveHistory as saveHistoryToStorage,
   saveProgressState,
+  createTrainerAssignment,
+  loadTrainerAssignments,
 } from './src/services/workoutStorage';
+import type { TrainerAssignment } from './src/types/user';
 
 
 const getWeekStart = (date: Date) => {
@@ -172,7 +175,7 @@ const mergeProgressWithRoutine = (existing: Record<string, ExerciseProgress>, ro
 const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
   Object.values(progress).filter((item) => item.done).length;
 
-type AppScreen = 'modify' | 'today';
+type AppScreen = 'modify' | 'today' | 'trainer';
 
 const getTodayName = () => {
   const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -188,6 +191,9 @@ export default function App() {
   const [history, setHistory] = useState<WeeklySummary[]>([]);
   const [savedWeekKey, setSavedWeekKey] = useState<string>(currentWeekKey);
   const [customRoutine, setCustomRoutine] = useState<RoutineDay[] | null>(null);
+  const [trainerAssignments, setTrainerAssignments] = useState<TrainerAssignment[]>([]);
+  const [trainerCode, setTrainerCode] = useState('');
+  const [assignmentMessage, setAssignmentMessage] = useState('');
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
     normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
@@ -209,6 +215,7 @@ export default function App() {
         const saved = await loadProgressState();
         const parsedHistoryFromStorage = await loadHistory();
         const savedRoutine = await loadCustomRoutine();
+        const savedAssignments = await loadTrainerAssignments();
 
         let parsedProgress = {} as Record<string, ExerciseProgress>;
         let parsedWeekKey = currentWeekKey;
@@ -223,6 +230,8 @@ export default function App() {
           setCustomRoutine(savedRoutine);
           setEditorRoutine(savedRoutine);
         }
+
+        setTrainerAssignments(savedAssignments);
 
         const defaultProgress = createDefaultProgress(routine);
         const normalizedProgress = mergeProgressWithRoutine(parsedProgress, routine);
@@ -427,6 +436,27 @@ export default function App() {
     await saveProgressState({ weekKey: savedWeekKey, progress: resetProgress });
   };
 
+  const sendTrainerRequest = async () => {
+    const normalizedCode = trainerCode.trim().toUpperCase();
+    if (normalizedCode.length < 4) {
+      setAssignmentMessage('Escribe un código de al menos 4 caracteres.');
+      return;
+    }
+
+    const existingRequest = trainerAssignments.find(
+      (assignment) => assignment.trainerId === normalizedCode && assignment.status === 'pending',
+    );
+    if (existingRequest) {
+      setAssignmentMessage('Ya tienes una solicitud pendiente para este entrenador.');
+      return;
+    }
+
+    const assignment = await createTrainerAssignment(normalizedCode, 'local-client');
+    setTrainerAssignments((current) => [...current, assignment]);
+    setTrainerCode('');
+    setAssignmentMessage('Solicitud enviada. El entrenador debe aceptarla.');
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -454,8 +484,54 @@ export default function App() {
           >
             <Text style={[styles.navigationText, activeScreen === 'modify' && styles.navigationTextActive]}>Modificar rutina</Text>
           </Pressable>
+          <Pressable
+            onPress={() => setActiveScreen('trainer')}
+            style={[styles.navigationButton, activeScreen === 'trainer' && styles.navigationButtonActive]}
+          >
+            <Text style={[styles.navigationText, activeScreen === 'trainer' && styles.navigationTextActive]}>Mi entrenador</Text>
+          </Pressable>
         </View>
 
+        {activeScreen === 'trainer' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Conectar con un entrenador</Text>
+            <Text style={styles.cardDescription}>
+              Introduce el código que te compartió tu entrenador para enviarle una solicitud.
+            </Text>
+            <TextInput
+              value={trainerCode}
+              onChangeText={(value) => {
+                setTrainerCode(value.toUpperCase());
+                setAssignmentMessage('');
+              }}
+              placeholder="Ej. FIT-2048"
+              placeholderTextColor="#64748b"
+              autoCapitalize="characters"
+              style={styles.trainerCodeInput}
+            />
+            <Pressable onPress={() => void sendTrainerRequest()} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Enviar solicitud</Text>
+            </Pressable>
+            {assignmentMessage ? <Text style={styles.assignmentMessage}>{assignmentMessage}</Text> : null}
+
+            <Text style={styles.sectionTitle}>Mis solicitudes</Text>
+            {trainerAssignments.length === 0 ? (
+              <Text style={styles.emptyState}>Todavía no tienes solicitudes de entrenador.</Text>
+            ) : (
+              trainerAssignments.map((assignment) => (
+                <View key={assignment.id} style={styles.assignmentItem}>
+                  <View>
+                    <Text style={styles.assignmentTrainer}>Código: {assignment.trainerId}</Text>
+                    <Text style={styles.historyText}>Solicitud enviada</Text>
+                  </View>
+                  <Text style={styles.assignmentStatus}>{assignment.status}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+
+        {activeScreen !== 'trainer' ? <View>
         {activeScreen === 'modify' ? <>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Equipo disponible</Text>
@@ -692,6 +768,7 @@ export default function App() {
             </View>
           ))}
         </View>
+        </View> : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -766,6 +843,54 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
+  },
+  cardDescription: {
+    color: '#cbd5e1',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  trainerCodeInput: {
+    backgroundColor: '#23352d',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3d5f4d',
+    color: '#f8fafc',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 15,
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  assignmentMessage: {
+    color: '#d7ddb2',
+    fontSize: 13,
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  assignmentItem: {
+    backgroundColor: '#1a2d27',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#355744',
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  assignmentTrainer: {
+    color: '#f8fafc',
+    fontWeight: '700',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  assignmentStatus: {
+    color: '#d7ddb2',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   chipWrap: {
     flexDirection: 'row',

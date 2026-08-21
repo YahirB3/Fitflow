@@ -3,6 +3,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -22,9 +23,16 @@ import {
   saveHistory as saveHistoryToStorage,
   saveProgressState,
   createTrainerAssignment,
+  createRoutineAssignment,
+  createRoutineTemplate,
   loadTrainerAssignments,
+  loadRoutineAssignments,
+  loadRoutineTemplates,
+  removeRoutineAssignment,
+  removeRoutineTemplate,
+  updateTrainerAssignmentStatus,
 } from './src/services/workoutStorage';
-import type { TrainerAssignment } from './src/types/user';
+import type { RoutineAssignment, RoutineTemplate, TrainerAssignment } from './src/types/user';
 
 
 const getWeekStart = (date: Date) => {
@@ -175,11 +183,31 @@ const mergeProgressWithRoutine = (existing: Record<string, ExerciseProgress>, ro
 const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
   Object.values(progress).filter((item) => item.done).length;
 
-type AppScreen = 'modify' | 'today' | 'trainer';
+type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel';
 
 const getTodayName = () => {
   const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
   return days[new Date().getDay()];
+};
+
+const createRoutineShareLink = (title: string, routine: RoutineDay[]) => {
+  if (typeof window === 'undefined') return '';
+  const payload = encodeURIComponent(JSON.stringify({ title, routine }));
+  return `${window.location.origin}${window.location.pathname}?sharedRoutine=${payload}`;
+};
+
+const readSharedRoutineFromUrl = (): { title: string; routine: RoutineDay[] } | null => {
+  if (typeof window === 'undefined') return null;
+  const encodedRoutine = new URLSearchParams(window.location.search).get('sharedRoutine');
+  if (!encodedRoutine) return null;
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encodedRoutine)) as Partial<{ title: string; routine: RoutineDay[] }>;
+    if (!parsed.title || !Array.isArray(parsed.routine) || parsed.routine.length === 0) return null;
+    return { title: parsed.title, routine: parsed.routine };
+  } catch {
+    return null;
+  }
 };
 
 export default function App() {
@@ -192,8 +220,13 @@ export default function App() {
   const [savedWeekKey, setSavedWeekKey] = useState<string>(currentWeekKey);
   const [customRoutine, setCustomRoutine] = useState<RoutineDay[] | null>(null);
   const [trainerAssignments, setTrainerAssignments] = useState<TrainerAssignment[]>([]);
+  const [routineAssignments, setRoutineAssignments] = useState<RoutineAssignment[]>([]);
+  const [routineTemplates, setRoutineTemplates] = useState<RoutineTemplate[]>([]);
   const [trainerCode, setTrainerCode] = useState('');
   const [assignmentMessage, setAssignmentMessage] = useState('');
+  const [routineTitle, setRoutineTitle] = useState('Rutina personalizada');
+  const [routineAssignmentMessage, setRoutineAssignmentMessage] = useState('');
+  const [selectedEditRoutineId, setSelectedEditRoutineId] = useState('default');
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
     normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
@@ -216,6 +249,9 @@ export default function App() {
         const parsedHistoryFromStorage = await loadHistory();
         const savedRoutine = await loadCustomRoutine();
         const savedAssignments = await loadTrainerAssignments();
+        const savedRoutineAssignments = await loadRoutineAssignments();
+        const savedRoutineTemplates = await loadRoutineTemplates();
+        const sharedRoutine = readSharedRoutineFromUrl();
 
         let parsedProgress = {} as Record<string, ExerciseProgress>;
         let parsedWeekKey = currentWeekKey;
@@ -232,6 +268,23 @@ export default function App() {
         }
 
         setTrainerAssignments(savedAssignments);
+        setRoutineAssignments(savedRoutineAssignments);
+        if (sharedRoutine) {
+          const importedTemplate = await createRoutineTemplate(
+            'local-client',
+            sharedRoutine.title,
+            sharedRoutine.routine,
+            'user',
+          );
+          const templatesWithSharedRoutine = [...savedRoutineTemplates, importedTemplate];
+          setRoutineTemplates(templatesWithSharedRoutine);
+          setRoutineAssignmentMessage(`Se importó "${sharedRoutine.title}" desde el enlace.`);
+          if (typeof window !== 'undefined') {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        } else {
+          setRoutineTemplates(savedRoutineTemplates);
+        }
 
         const defaultProgress = createDefaultProgress(routine);
         const normalizedProgress = mergeProgressWithRoutine(parsedProgress, routine);
@@ -382,7 +435,14 @@ export default function App() {
   };
 
   const createCustomRoutine = () => {
+    setSelectedEditRoutineId('new');
     setEditorRoutine(createBlankRoutine());
+    setIsEditingWeek(true);
+  };
+
+  const editSelectedRoutine = (routineId: string, selectedRoutine: RoutineDay[]) => {
+    setSelectedEditRoutineId(routineId);
+    setEditorRoutine(normalizeRoutine(selectedRoutine, routine));
     setIsEditingWeek(true);
   };
 
@@ -401,6 +461,30 @@ export default function App() {
             },
       ),
     );
+  };
+
+  const addEditorExercise = (dayIndex: number) => {
+    setEditorRoutine((current) => current.map((day, currentDayIndex) => (
+      currentDayIndex !== dayIndex
+        ? day
+        : {
+            ...day,
+            exercises: [
+              ...day.exercises,
+              { name: 'Nuevo ejercicio', sets: '3 series', reps: '8-10', note: 'Añade una nota' },
+            ],
+          }
+    )));
+  };
+
+  const removeEditorExercise = (dayIndex: number, exerciseIndex: number) => {
+    setEditorRoutine((current) => current.map((day, currentDayIndex) => {
+      if (currentDayIndex !== dayIndex || day.exercises.length <= 1) return day;
+      return {
+        ...day,
+        exercises: day.exercises.filter((_, currentExerciseIndex) => currentExerciseIndex !== exerciseIndex),
+      };
+    }));
   };
 
   const pickExerciseImage = async (dayIndex: number, exerciseIndex: number) => {
@@ -457,39 +541,204 @@ export default function App() {
     setAssignmentMessage('Solicitud enviada. El entrenador debe aceptarla.');
   };
 
+  const changeAssignmentStatus = async (assignmentId: string, status: 'active' | 'rejected') => {
+    const updatedAssignment = await updateTrainerAssignmentStatus(assignmentId, status);
+    if (!updatedAssignment) return;
+
+    setTrainerAssignments((current) => current.map((assignment) => (
+      assignment.id === assignmentId ? updatedAssignment : assignment
+    )));
+  };
+
+  const endTrainerConnection = async (assignmentId: string) => {
+    const updatedAssignment = await updateTrainerAssignmentStatus(assignmentId, 'ended');
+    if (!updatedAssignment) return;
+
+    setTrainerAssignments((current) => current.map((assignment) => (
+      assignment.id === assignmentId ? updatedAssignment : assignment
+    )));
+    setRoutineAssignmentMessage('La relación con el entrenador ha terminado.');
+  };
+
+  const deleteSavedRoutine = async (templateId: string) => {
+    await removeRoutineTemplate(templateId);
+    setRoutineTemplates((current) => current.filter((template) => template.id !== templateId));
+    setRoutineAssignmentMessage('La rutina guardada fue eliminada.');
+  };
+
+  const deleteRoutineFromHistory = async (assignmentId: string) => {
+    await removeRoutineAssignment(assignmentId);
+    setRoutineAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
+    setRoutineAssignmentMessage('La rutina del historial fue eliminada.');
+  };
+
+  const assignRoutineToClient = async (clientAssignment: TrainerAssignment) => {
+    const title = routineTitle.trim();
+    if (!title) {
+      setRoutineAssignmentMessage('Escribe un nombre para la rutina.');
+      return;
+    }
+
+    const routineAssignment = await createRoutineAssignment(
+      clientAssignment.trainerId,
+      clientAssignment.clientId,
+      title,
+      routine,
+    );
+    setRoutineAssignments((current) => [
+      ...current.filter((item) => item.id !== routineAssignment.id && item.clientId !== clientAssignment.clientId),
+      routineAssignment,
+    ]);
+    setRoutineAssignmentMessage(`Rutina asignada a ${clientAssignment.clientId}.`);
+  };
+
+  const saveCurrentRoutineAsTemplate = async () => {
+    const title = routineTitle.trim();
+    if (!title) {
+      setRoutineAssignmentMessage('Escribe un nombre para guardar la plantilla.');
+      return;
+    }
+
+    const template = await createRoutineTemplate('local-trainer', title, routine);
+    setRoutineTemplates((current) => [...current, template]);
+    setRoutineAssignmentMessage(`Plantilla "${template.title}" guardada.`);
+  };
+
+  const assignTemplateToClient = async (template: RoutineTemplate, clientAssignment: TrainerAssignment) => {
+    const routineAssignment = await createRoutineAssignment(
+      clientAssignment.trainerId,
+      clientAssignment.clientId,
+      template.title,
+      template.routine,
+      template.id,
+    );
+    setRoutineAssignments((current) => [
+      ...current.filter((item) => item.clientId !== clientAssignment.clientId),
+      routineAssignment,
+    ]);
+    setRoutineAssignmentMessage(`"${template.title}" asignada a ${clientAssignment.clientId}.`);
+  };
+
+  const saveCurrentRoutineAsUserTemplate = async () => {
+    const title = routineTitle.trim();
+    if (!title) {
+      setRoutineAssignmentMessage('Escribe un nombre para guardar tu rutina.');
+      return;
+    }
+
+    const template = await createRoutineTemplate('local-client', title, routine, 'user');
+    setRoutineTemplates((current) => [...current, template]);
+    setRoutineAssignmentMessage(`Tu rutina "${template.title}" quedó guardada.`);
+  };
+
+  const shareRoutine = async (title: string, sharedRoutine: RoutineDay[]) => {
+    const link = createRoutineShareLink(title, sharedRoutine);
+    if (!link) {
+      setRoutineAssignmentMessage('Los enlaces compartidos están disponibles en la versión web.');
+      return;
+    }
+
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(link);
+        setRoutineAssignmentMessage(`Enlace de "${title}" copiado.`);
+        return;
+      }
+    } catch {
+      // Continue with the native share dialog when clipboard access is unavailable.
+    }
+
+    await Share.share({
+      message: `Prueba esta rutina de FitFlow: ${link}`,
+      url: link,
+    });
+  };
+
+  const activateUserRoutine = async (template: RoutineTemplate) => {
+    const nextRoutine = normalizeRoutine(template.routine, routine);
+    setCustomRoutine(nextRoutine);
+    setEditorRoutine(nextRoutine);
+    setWeekProgress(createDefaultProgress(nextRoutine));
+    await saveRoutineToStorage(nextRoutine);
+    await saveProgressState({ weekKey: savedWeekKey, progress: createDefaultProgress(nextRoutine) });
+    setRoutineAssignmentMessage(`Ahora estás usando "${template.title}".`);
+  };
+
+  const activateAssignedRoutine = async (assignment: RoutineAssignment) => {
+    const nextRoutine = normalizeRoutine(assignment.routine, routine);
+    setCustomRoutine(nextRoutine);
+    setEditorRoutine(nextRoutine);
+    setWeekProgress(createDefaultProgress(nextRoutine));
+    await saveRoutineToStorage(nextRoutine);
+    await saveProgressState({ weekKey: savedWeekKey, progress: createDefaultProgress(nextRoutine) });
+    setRoutineAssignmentMessage(`Ahora estás usando "${assignment.title}".`);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
+      <View style={styles.appShell}>
+        <View style={styles.sidebar}>
           <View style={styles.brandRow}>
             <Image source={require('./assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
             <View>
               <Text style={styles.title}>FitFlow</Text>
-              <Text style={styles.subtitle}>Plan de 5 días · Masa + tonificación</Text>
+              <Text style={styles.sidebarSubtitle}>FITNESS OS</Text>
             </View>
           </View>
-        </View>
-
-        <View style={styles.navigationRow}>
+          <Text style={styles.sidebarLabel}>ENTRENAMIENTO</Text>
           <Pressable
             onPress={() => setActiveScreen('today')}
             style={[styles.navigationButton, activeScreen === 'today' && styles.navigationButtonActive]}
           >
-            <Text style={[styles.navigationText, activeScreen === 'today' && styles.navigationTextActive]}>Entrenamiento de hoy</Text>
+            <Text style={styles.navigationIcon}>01</Text>
+            <Text style={[styles.navigationText, activeScreen === 'today' && styles.navigationTextActive]}>Hoy</Text>
           </Pressable>
           <Pressable
             onPress={() => setActiveScreen('modify')}
             style={[styles.navigationButton, activeScreen === 'modify' && styles.navigationButtonActive]}
           >
+            <Text style={styles.navigationIcon}>02</Text>
             <Text style={[styles.navigationText, activeScreen === 'modify' && styles.navigationTextActive]}>Modificar rutina</Text>
           </Pressable>
+          <Pressable
+            onPress={() => setActiveScreen('routines')}
+            style={[styles.navigationButton, activeScreen === 'routines' && styles.navigationButtonActive]}
+          >
+            <Text style={styles.navigationIcon}>03</Text>
+            <Text style={[styles.navigationText, activeScreen === 'routines' && styles.navigationTextActive]}>Mis rutinas</Text>
+          </Pressable>
+          <Text style={styles.sidebarLabel}>COMUNIDAD</Text>
           <Pressable
             onPress={() => setActiveScreen('trainer')}
             style={[styles.navigationButton, activeScreen === 'trainer' && styles.navigationButtonActive]}
           >
+            <Text style={styles.navigationIcon}>04</Text>
             <Text style={[styles.navigationText, activeScreen === 'trainer' && styles.navigationTextActive]}>Mi entrenador</Text>
           </Pressable>
+          <Pressable
+            onPress={() => setActiveScreen('trainerPanel')}
+            style={[styles.navigationButton, activeScreen === 'trainerPanel' && styles.navigationButtonActive]}
+          >
+            <Text style={styles.navigationIcon}>05</Text>
+            <Text style={[styles.navigationText, activeScreen === 'trainerPanel' && styles.navigationTextActive]}>Panel entrenador</Text>
+          </Pressable>
+          <View style={styles.sidebarFooter}>
+            <Text style={styles.sidebarFooterTitle}>FOCUS MODE</Text>
+            <Text style={styles.sidebarFooterText}>Construye constancia, una sesión a la vez.</Text>
+          </View>
+        </View>
+
+        <View style={styles.mainContent}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.topbar}>
+          <View>
+            <Text style={styles.eyebrow}>TU ESPACIO DE ENTRENAMIENTO</Text>
+            <Text style={styles.pageTitle}>{activeScreen === 'today' ? 'Entrenamiento de hoy' : activeScreen === 'modify' ? 'Diseña tu rutina' : activeScreen === 'routines' ? 'Tu biblioteca' : activeScreen === 'trainer' ? 'Tu coach' : 'Centro del entrenador'}</Text>
+          </View>
+          <View style={styles.topbarBadge}>
+            <Text style={styles.topbarBadgeText}>{progressPercent}% SEMANA</Text>
+          </View>
         </View>
 
         {activeScreen === 'trainer' ? (
@@ -520,18 +769,203 @@ export default function App() {
             ) : (
               trainerAssignments.map((assignment) => (
                 <View key={assignment.id} style={styles.assignmentItem}>
-                  <View>
+                  <View style={styles.assignmentDetails}>
                     <Text style={styles.assignmentTrainer}>Código: {assignment.trainerId}</Text>
                     <Text style={styles.historyText}>Solicitud enviada</Text>
                   </View>
-                  <Text style={styles.assignmentStatus}>{assignment.status}</Text>
+                  <View style={styles.assignmentActions}>
+                    <Text style={styles.assignmentStatus}>{assignment.status}</Text>
+                    {assignment.status === 'active' ? (
+                      <Pressable
+                        onPress={() => void endTrainerConnection(assignment.id)}
+                        style={styles.rejectButton}
+                      >
+                        <Text style={styles.actionButtonText}>Quitar entrenador</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
               ))
             )}
           </View>
         ) : null}
 
-        {activeScreen !== 'trainer' ? <View>
+        {activeScreen === 'routines' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Mis rutinas guardadas</Text>
+            <Text style={styles.cardDescription}>
+              Guarda planes para casa, gimnasio o los que te comparta tu coach. Solo una rutina se usa como activa.
+            </Text>
+            <TextInput
+              value={routineTitle}
+              onChangeText={(value) => {
+                setRoutineTitle(value);
+                setRoutineAssignmentMessage('');
+              }}
+              placeholder="Ej. Rutina casa"
+              placeholderTextColor="#64748b"
+              style={styles.trainerCodeInput}
+            />
+            <Pressable onPress={() => void saveCurrentRoutineAsUserTemplate()} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Guardar rutina actual</Text>
+            </Pressable>
+            {routineTemplates.filter((template) => template.ownerRole === 'user').length === 0 ? (
+              <Text style={styles.emptyState}>Todavía no tienes rutinas guardadas.</Text>
+            ) : (
+              routineTemplates
+                .filter((template) => template.ownerRole === 'user')
+                .map((template) => (
+                  <View key={template.id} style={styles.templateItem}>
+                    <View style={styles.assignmentDetails}>
+                      <Text style={styles.assignmentTrainer}>{template.title}</Text>
+                      <Text style={styles.historyText}>{template.routine.length} días programados</Text>
+                    </View>
+                    <View style={styles.assignmentActions}>
+                      <Pressable onPress={() => void activateUserRoutine(template)} style={styles.acceptButton}>
+                        <Text style={styles.actionButtonText}>Usar rutina</Text>
+                      </Pressable>
+                      <Pressable onPress={() => void shareRoutine(template.title, template.routine)} style={styles.shareButton}>
+                        <Text style={styles.actionButtonText}>Compartir</Text>
+                      </Pressable>
+                      <Pressable onPress={() => void deleteSavedRoutine(template.id)} style={styles.rejectButton}>
+                        <Text style={styles.actionButtonText}>Borrar</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))
+            )}
+            <Text style={styles.sectionTitle}>Rutinas de mis coaches</Text>
+            {routineAssignments.filter((assignment) => assignment.clientId === 'local-client').length === 0 ? (
+              <Text style={styles.emptyState}>Todavía no te han asignado una rutina.</Text>
+            ) : (
+              routineAssignments
+                .filter((assignment) => assignment.clientId === 'local-client')
+                .map((assignment) => (
+                  <View key={assignment.id} style={styles.templateItem}>
+                    <View style={styles.assignmentDetails}>
+                      <Text style={styles.assignmentTrainer}>{assignment.title}</Text>
+                      <Text style={styles.historyText}>
+                        Coach: {assignment.trainerId} · {assignment.status}
+                      </Text>
+                    </View>
+                    <View style={styles.assignmentActions}>
+                      {assignment.status === 'active' ? (
+                        <Pressable onPress={() => void activateAssignedRoutine(assignment)} style={styles.acceptButton}>
+                          <Text style={styles.actionButtonText}>Usar rutina</Text>
+                        </Pressable>
+                      ) : null}
+                      <Pressable onPress={() => void shareRoutine(assignment.title, assignment.routine)} style={styles.shareButton}>
+                        <Text style={styles.actionButtonText}>Compartir</Text>
+                      </Pressable>
+                      <Pressable onPress={() => void deleteRoutineFromHistory(assignment.id)} style={styles.rejectButton}>
+                        <Text style={styles.actionButtonText}>Borrar</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))
+            )}
+            {routineAssignmentMessage ? (
+              <Text style={styles.assignmentMessage}>{routineAssignmentMessage}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {activeScreen === 'trainerPanel' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Solicitudes de clientes</Text>
+            <Text style={styles.cardDescription}>
+              Revisa las solicitudes y decide qué clientes pueden trabajar contigo.
+            </Text>
+            {trainerAssignments.length === 0 ? (
+              <Text style={styles.emptyState}>No hay solicitudes disponibles.</Text>
+            ) : (
+              trainerAssignments.map((assignment) => (
+                <View key={assignment.id} style={styles.assignmentItem}>
+                  <View style={styles.assignmentDetails}>
+                    <Text style={styles.assignmentTrainer}>Cliente: {assignment.clientId}</Text>
+                    <Text style={styles.historyText}>Código: {assignment.trainerId}</Text>
+                    <Text style={styles.assignmentStatus}>{assignment.status}</Text>
+                  </View>
+                  {assignment.status === 'pending' ? (
+                    <View style={styles.assignmentActions}>
+                      <Pressable
+                        onPress={() => void changeAssignmentStatus(assignment.id, 'active')}
+                        style={styles.acceptButton}
+                      >
+                        <Text style={styles.actionButtonText}>Aceptar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void changeAssignmentStatus(assignment.id, 'rejected')}
+                        style={styles.rejectButton}
+                      >
+                        <Text style={styles.actionButtonText}>Rechazar</Text>
+                      </Pressable>
+                    </View>
+                  ) : assignment.status === 'active' ? (
+                    <Pressable
+                      onPress={() => void endTrainerConnection(assignment.id)}
+                      style={styles.rejectButton}
+                    >
+                      <Text style={styles.actionButtonText}>Quitar cliente</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))
+            )}
+            <Text style={styles.sectionTitle}>Biblioteca de rutinas</Text>
+            <Text style={styles.cardDescription}>
+              Guarda varias rutinas por nivel u objetivo y asígnalas sin crearlas de nuevo.
+            </Text>
+            <TextInput
+              value={routineTitle}
+              onChangeText={(value) => {
+                setRoutineTitle(value);
+                setRoutineAssignmentMessage('');
+              }}
+              placeholder="Nombre de la rutina"
+              placeholderTextColor="#64748b"
+              style={styles.trainerCodeInput}
+            />
+            <Pressable onPress={() => void saveCurrentRoutineAsTemplate()} style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>Guardar rutina actual</Text>
+            </Pressable>
+            {routineTemplates.filter((template) => template.ownerRole === 'trainer').length === 0 ? (
+              <Text style={styles.emptyState}>Todavía no tienes rutinas guardadas.</Text>
+            ) : (
+              routineTemplates
+                .filter((template) => template.ownerRole === 'trainer')
+                .map((template) => (
+                <View key={template.id} style={styles.templateItem}>
+                  <View style={styles.assignmentDetails}>
+                    <Text style={styles.assignmentTrainer}>{template.title}</Text>
+                    <Text style={styles.historyText}>{template.routine.length} días programados</Text>
+                  </View>
+                  <View style={styles.templateClientList}>
+                    {trainerAssignments
+                      .filter((assignment) => assignment.status === 'active')
+                      .map((assignment) => (
+                        <Pressable
+                          key={`${template.id}-${assignment.id}`}
+                          onPress={() => void assignTemplateToClient(template, assignment)}
+                          style={styles.acceptButton}
+                        >
+                          <Text style={styles.actionButtonText}>A {assignment.clientId}</Text>
+                        </Pressable>
+                      ))}
+                    <Pressable onPress={() => void deleteSavedRoutine(template.id)} style={styles.rejectButton}>
+                      <Text style={styles.actionButtonText}>Borrar rutina</Text>
+                    </Pressable>
+                  </View>
+                </View>
+                ))
+            )}
+            {routineAssignmentMessage ? (
+              <Text style={styles.assignmentMessage}>{routineAssignmentMessage}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {activeScreen !== 'trainer' && activeScreen !== 'routines' && activeScreen !== 'trainerPanel' ? <View>
         {activeScreen === 'modify' ? <>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Equipo disponible</Text>
@@ -569,6 +1003,55 @@ export default function App() {
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Plan semanal</Text>
+          <Text style={styles.cardDescription}>¿Qué rutina quieres modificar?</Text>
+          <View style={styles.routineOptions}>
+            <Pressable
+              onPress={() => editSelectedRoutine('default', getRoutine(selectedEquipment, intensity))}
+              style={[styles.routineOption, selectedEditRoutineId === 'default' && styles.routineOptionActive]}
+            >
+              <Text style={[styles.routineOptionTitle, selectedEditRoutineId === 'default' && styles.routineOptionTitleActive]}>
+                Rutina default
+              </Text>
+              <Text style={styles.routineOptionMeta}>Generada por FitFlow</Text>
+            </Pressable>
+            {routineTemplates
+              .filter((template) => template.ownerRole === 'user')
+              .map((template) => (
+                <Pressable
+                  key={`edit-template-${template.id}`}
+                  onPress={() => editSelectedRoutine(template.id, template.routine)}
+                  style={[styles.routineOption, selectedEditRoutineId === template.id && styles.routineOptionActive]}
+                >
+                  <Text style={[styles.routineOptionTitle, selectedEditRoutineId === template.id && styles.routineOptionTitleActive]}>
+                    {template.title}
+                  </Text>
+                  <Text style={styles.routineOptionMeta}>Rutina guardada</Text>
+                </Pressable>
+              ))}
+            {routineAssignments
+              .filter((assignment) => assignment.clientId === 'local-client')
+              .map((assignment) => (
+                <Pressable
+                  key={`edit-assignment-${assignment.id}`}
+                  onPress={() => editSelectedRoutine(assignment.id, assignment.routine)}
+                  style={[styles.routineOption, selectedEditRoutineId === assignment.id && styles.routineOptionActive]}
+                >
+                  <Text style={[styles.routineOptionTitle, selectedEditRoutineId === assignment.id && styles.routineOptionTitleActive]}>
+                    {assignment.title}
+                  </Text>
+                  <Text style={styles.routineOptionMeta}>Rutina del coach</Text>
+                </Pressable>
+              ))}
+            <Pressable
+              onPress={createCustomRoutine}
+              style={[styles.routineOption, selectedEditRoutineId === 'new' && styles.routineOptionActive]}
+            >
+              <Text style={[styles.routineOptionTitle, selectedEditRoutineId === 'new' && styles.routineOptionTitleActive]}>
+                Crear nueva
+              </Text>
+              <Text style={styles.routineOptionMeta}>Empieza desde cero</Text>
+            </Pressable>
+          </View>
           <View style={styles.summaryRow}>
             <Text style={styles.progressText}>
               {customRoutine ? 'Rutina personalizada' : 'Rutina default generada'}
@@ -609,6 +1092,15 @@ export default function App() {
                 />
                 {dayPlan.exercises.map((exercise, exerciseIndex) => (
                   <View key={`${dayPlan.day}-${exercise.name}-${exerciseIndex}`} style={styles.editorExerciseCard}>
+                    <View style={styles.editorExerciseHeader}>
+                      <Text style={styles.editorExerciseLabel}>Ejercicio {exerciseIndex + 1}</Text>
+                      <Pressable
+                        onPress={() => removeEditorExercise(dayIndex, exerciseIndex)}
+                        style={styles.removeExerciseButton}
+                      >
+                        <Text style={styles.removeExerciseText}>Eliminar</Text>
+                      </Pressable>
+                    </View>
                     <TextInput
                       value={exercise.name}
                       onChangeText={(value) => updateEditorExercise(dayIndex, exerciseIndex, 'name', value)}
@@ -651,6 +1143,9 @@ export default function App() {
                     </Pressable>
                   </View>
                 ))}
+                <Pressable onPress={() => addEditorExercise(dayIndex)} style={styles.addExerciseButton}>
+                  <Text style={styles.addExerciseText}>+ Agregar otro ejercicio</Text>
+                </Pressable>
               </View>
             ))}
             <View style={styles.summaryRow}>
@@ -770,6 +1265,8 @@ export default function App() {
         </View>
         </View> : null}
       </ScrollView>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -777,14 +1274,96 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#171b1a',
+    backgroundColor: '#0b151d',
+  },
+  appShell: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#0b151d',
+  },
+  sidebar: {
+    width: 220,
+    backgroundColor: '#0f1e27',
+    borderRightWidth: 1,
+    borderRightColor: '#233b47',
+    paddingHorizontal: 16,
+    paddingVertical: 22,
+  },
+  mainContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sidebarSubtitle: {
+    color: '#27b6f2',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  sidebarLabel: {
+    color: '#5c7b89',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    marginTop: 32,
+    marginBottom: 10,
+  },
+  sidebarFooter: {
+    marginTop: 'auto',
+    borderWidth: 1,
+    borderColor: '#29434f',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: '#132832',
+  },
+  sidebarFooterTitle: {
+    color: '#ffcf3f',
+    fontSize: 11,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  sidebarFooterText: {
+    color: '#9ab0bb',
+    fontSize: 11,
+    lineHeight: 16,
   },
   scrollContent: {
     width: '100%',
     maxWidth: 1180,
     alignSelf: 'center',
-    padding: 20,
+    paddingHorizontal: 30,
+    paddingTop: 24,
     paddingBottom: 40,
+  },
+  topbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  eyebrow: {
+    color: '#27b6f2',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  pageTitle: {
+    color: '#f5fbff',
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  topbarBadge: {
+    backgroundColor: '#162f3d',
+    borderWidth: 1,
+    borderColor: '#28627a',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  topbarBadgeText: {
+    color: '#7ed8ff',
+    fontSize: 10,
+    fontWeight: '900',
   },
   header: {
     marginBottom: 18,
@@ -795,22 +1374,32 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   navigationButton: {
-    flex: 1,
-    backgroundColor: '#26352d',
-    borderRadius: 10,
-    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 11,
+    marginBottom: 5,
   },
   navigationButtonActive: {
-    backgroundColor: '#7e9b6d',
+    backgroundColor: '#1b566c',
+    borderWidth: 1,
+    borderColor: '#2ebcf2',
+  },
+  navigationIcon: {
+    color: '#5f8493',
+    fontSize: 10,
+    fontWeight: '900',
+    width: 26,
   },
   navigationText: {
-    color: '#cbd5e1',
-    fontWeight: '700',
-    textAlign: 'center',
+    color: '#9ab0bb',
+    fontSize: 12,
+    fontWeight: '800',
   },
   navigationTextActive: {
-    color: '#102018',
+    color: '#f3fbff',
   },
   brandRow: {
     flexDirection: 'row',
@@ -823,39 +1412,39 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#f8fafc',
-    fontSize: 32,
+    fontSize: 22,
     fontWeight: '800',
   },
   subtitle: {
-    color: '#cbd5e1',
-    fontSize: 16,
+    color: '#9ab0bb',
+    fontSize: 12,
   },
   card: {
-    backgroundColor: '#17251f',
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 18,
+    backgroundColor: '#10232c',
+    borderRadius: 14,
+    padding: 20,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#355744',
+    borderColor: '#29434f',
   },
   sectionTitle: {
-    color: '#edf5e8',
-    fontSize: 18,
-    fontWeight: '700',
+    color: '#f2fbff',
+    fontSize: 17,
+    fontWeight: '900',
     marginBottom: 14,
   },
   cardDescription: {
-    color: '#cbd5e1',
+    color: '#9ab0bb',
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 14,
   },
   trainerCodeInput: {
-    backgroundColor: '#23352d',
+    backgroundColor: '#0c1b23',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#3d5f4d',
-    color: '#f8fafc',
+    borderColor: '#315161',
+    color: '#f2fbff',
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
@@ -869,6 +1458,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   assignmentItem: {
+    backgroundColor: '#132c37',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#294f5e',
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  routineAssignmentItem: {
     backgroundColor: '#1a2d27',
     borderRadius: 12,
     paddingHorizontal: 12,
@@ -879,6 +1480,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  templateItem: {
+    backgroundColor: '#1a2d27',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#355744',
+    marginBottom: 8,
+  },
+  templateClientList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
   },
   assignmentTrainer: {
     color: '#f8fafc',
@@ -892,12 +1508,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
   },
+  assignmentDetails: {
+    flex: 1,
+    marginRight: 10,
+  },
+  assignmentActions: {
+    gap: 6,
+  },
+  acceptButton: {
+    backgroundColor: '#27b6f2',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  shareButton: {
+    backgroundColor: '#386a7c',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  rejectButton: {
+    backgroundColor: '#a9435b',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  actionButtonText: {
+    color: '#071923',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   chip: {
-    backgroundColor: '#2b362f',
+    backgroundColor: '#1b3540',
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -905,7 +1551,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   chipActive: {
-    backgroundColor: '#7e9b6d',
+    backgroundColor: '#ffcf3f',
   },
   chipText: {
     color: '#e2e8f0',
@@ -913,14 +1559,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chipTextActive: {
-    color: '#102018',
+    color: '#18242a',
   },
   intensityRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   intensityButton: {
-    backgroundColor: '#2b362f',
+    backgroundColor: '#1b3540',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -928,19 +1574,48 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   intensityButtonActive: {
-    backgroundColor: '#a4b98e',
+    backgroundColor: '#27b6f2',
   },
   intensityText: {
     color: '#e2e8f0',
     fontWeight: '700',
   },
   intensityTextActive: {
-    color: '#17211b',
+    color: '#08202b',
   },
   intensityDescription: {
     color: '#cbd5e1',
     marginTop: 8,
     fontSize: 14,
+  },
+  routineOptions: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  routineOption: {
+    backgroundColor: '#173541',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2d5666',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  routineOptionActive: {
+    backgroundColor: '#27b6f2',
+    borderColor: '#7ed8ff',
+  },
+  routineOptionTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  routineOptionTitleActive: {
+    color: '#122018',
+  },
+  routineOptionMeta: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    marginTop: 3,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -972,16 +1647,16 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#7e9b6d',
+    backgroundColor: '#27b6f2',
     borderRadius: 999,
   },
   historyItem: {
-    backgroundColor: '#1a2d27',
+    backgroundColor: '#132c37',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#355744',
+    borderColor: '#294f5e',
     marginBottom: 8,
   },
   historyLabel: {
@@ -999,15 +1674,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   dayCard: {
-    backgroundColor: '#1a2d27',
+    backgroundColor: '#132c37',
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#355744',
+    borderColor: '#294f5e',
   },
   dayLabel: {
-    color: '#d7ddb2',
+    color: '#ffcf3f',
     fontWeight: '800',
     fontSize: 14,
     marginBottom: 4,
@@ -1048,8 +1723,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
   },
   checkboxActive: {
-    backgroundColor: '#7e9b6d',
-    borderColor: '#7e9b6d',
+    backgroundColor: '#27b6f2',
+    borderColor: '#27b6f2',
   },
   checkmark: {
     color: '#052e16',
@@ -1090,10 +1765,10 @@ const styles = StyleSheet.create({
   },
   weightInput: {
     flex: 1,
-    backgroundColor: '#223a31',
+    backgroundColor: '#0c1b23',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#3d5f4d',
+    borderColor: '#315161',
     color: '#f8fafc',
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -1137,11 +1812,46 @@ const styles = StyleSheet.create({
   },
   editorExerciseCard: {
     marginBottom: 10,
-    backgroundColor: '#1f352d',
+    backgroundColor: '#173541',
     borderRadius: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#3d5f4d',
+    borderColor: '#2d5666',
+  },
+  editorExerciseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  editorExerciseLabel: {
+    color: '#ffcf3f',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  removeExerciseButton: {
+    backgroundColor: '#5b3030',
+    borderRadius: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  removeExerciseText: {
+    color: '#fecaca',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  addExerciseButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#617a59',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 2,
+  },
+  addExerciseText: {
+    color: '#eff6ff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   editorInlineRow: {
     flexDirection: 'row',
@@ -1155,11 +1865,11 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   editorInput: {
-    backgroundColor: '#23352d',
+    backgroundColor: '#0c1b23',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#3d5f4d',
-    color: '#f8fafc',
+    borderColor: '#315161',
+    color: '#f2fbff',
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 8,
@@ -1179,18 +1889,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   primaryButton: {
-    backgroundColor: '#7e9b6d',
+    backgroundColor: '#27b6f2',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
   },
   primaryButtonText: {
-    color: '#122018',
+    color: '#071923',
     fontWeight: '800',
     fontSize: 12,
   },
   secondaryButton: {
-    backgroundColor: '#334155',
+    backgroundColor: '#29434f',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,

@@ -7,6 +7,7 @@ export type UserProfile = {
   name: string;
   email: string;
   role: UserRole;
+  level?: 'Principiante' | 'Intermedio' | 'Avanzado';
   goals?: string[];
   equipment?: string[];
   createdAt: string;

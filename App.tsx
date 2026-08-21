@@ -28,11 +28,13 @@ import {
   loadTrainerAssignments,
   loadRoutineAssignments,
   loadRoutineTemplates,
+  loadUserProfile,
   removeRoutineAssignment,
   removeRoutineTemplate,
+  saveUserProfile,
   updateTrainerAssignmentStatus,
 } from './src/services/workoutStorage';
-import type { RoutineAssignment, RoutineTemplate, TrainerAssignment } from './src/types/user';
+import type { RoutineAssignment, RoutineTemplate, TrainerAssignment, UserProfile } from './src/types/user';
 
 
 const getWeekStart = (date: Date) => {
@@ -183,7 +185,7 @@ const mergeProgressWithRoutine = (existing: Record<string, ExerciseProgress>, ro
 const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
   Object.values(progress).filter((item) => item.done).length;
 
-type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel';
+type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel' | 'profile';
 
 const getTodayName = () => {
   const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -227,6 +229,18 @@ export default function App() {
   const [routineTitle, setRoutineTitle] = useState('Rutina personalizada');
   const [routineAssignmentMessage, setRoutineAssignmentMessage] = useState('');
   const [selectedEditRoutineId, setSelectedEditRoutineId] = useState('default');
+  const [profile, setProfile] = useState<UserProfile>({
+    id: 'local-user',
+    name: '',
+    email: '',
+    role: 'user',
+    level: 'Principiante',
+    goals: [],
+    equipment: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const [profileMessage, setProfileMessage] = useState('');
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
     normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
@@ -251,6 +265,7 @@ export default function App() {
         const savedAssignments = await loadTrainerAssignments();
         const savedRoutineAssignments = await loadRoutineAssignments();
         const savedRoutineTemplates = await loadRoutineTemplates();
+        const savedProfile = await loadUserProfile();
         const sharedRoutine = readSharedRoutineFromUrl();
 
         let parsedProgress = {} as Record<string, ExerciseProgress>;
@@ -269,6 +284,9 @@ export default function App() {
 
         setTrainerAssignments(savedAssignments);
         setRoutineAssignments(savedRoutineAssignments);
+        if (savedProfile) {
+          setProfile(savedProfile);
+        }
         if (sharedRoutine) {
           const importedTemplate = await createRoutineTemplate(
             'local-client',
@@ -674,6 +692,29 @@ export default function App() {
     setRoutineAssignmentMessage(`Ahora estás usando "${assignment.title}".`);
   };
 
+  const updateProfileField = (field: 'name' | 'email' | 'level', value: string) => {
+    setProfile((current) => ({ ...current, [field]: value, updatedAt: new Date().toISOString() }));
+    setProfileMessage('');
+  };
+
+  const saveProfile = async () => {
+    if (!profile.name.trim() || !profile.email.trim()) {
+      setProfileMessage('Completa tu nombre y correo para guardar el perfil.');
+      return;
+    }
+
+    const nextProfile = {
+      ...profile,
+      name: profile.name.trim(),
+      email: profile.email.trim(),
+      equipment: selectedEquipment,
+      updatedAt: new Date().toISOString(),
+    };
+    setProfile(nextProfile);
+    await saveUserProfile(nextProfile);
+    setProfileMessage('Perfil guardado correctamente.');
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -723,6 +764,14 @@ export default function App() {
             <Text style={styles.navigationIcon}>05</Text>
             <Text style={[styles.navigationText, activeScreen === 'trainerPanel' && styles.navigationTextActive]}>Panel entrenador</Text>
           </Pressable>
+          <Text style={styles.sidebarLabel}>CUENTA</Text>
+          <Pressable
+            onPress={() => setActiveScreen('profile')}
+            style={[styles.navigationButton, activeScreen === 'profile' && styles.navigationButtonActive]}
+          >
+            <Text style={styles.navigationIcon}>06</Text>
+            <Text style={[styles.navigationText, activeScreen === 'profile' && styles.navigationTextActive]}>Mi perfil</Text>
+          </Pressable>
           <View style={styles.sidebarFooter}>
             <Text style={styles.sidebarFooterTitle}>FOCUS MODE</Text>
             <Text style={styles.sidebarFooterText}>Construye constancia, una sesión a la vez.</Text>
@@ -734,12 +783,82 @@ export default function App() {
         <View style={styles.topbar}>
           <View>
             <Text style={styles.eyebrow}>TU ESPACIO DE ENTRENAMIENTO</Text>
-            <Text style={styles.pageTitle}>{activeScreen === 'today' ? 'Entrenamiento de hoy' : activeScreen === 'modify' ? 'Diseña tu rutina' : activeScreen === 'routines' ? 'Tu biblioteca' : activeScreen === 'trainer' ? 'Tu coach' : 'Centro del entrenador'}</Text>
+            <Text style={styles.pageTitle}>{activeScreen === 'today' ? 'Entrenamiento de hoy' : activeScreen === 'modify' ? 'Diseña tu rutina' : activeScreen === 'routines' ? 'Tu biblioteca' : activeScreen === 'trainer' ? 'Tu coach' : activeScreen === 'profile' ? 'Mi perfil' : 'Centro del entrenador'}</Text>
           </View>
           <View style={styles.topbarBadge}>
             <Text style={styles.topbarBadgeText}>{progressPercent}% SEMANA</Text>
           </View>
         </View>
+
+        {activeScreen === 'profile' ? (
+          <View style={styles.profileGrid}>
+            <View style={styles.profileHero}>
+              <View style={styles.profileAvatar}>
+                <Text style={styles.profileAvatarText}>{profile.name.trim().charAt(0).toUpperCase() || 'F'}</Text>
+              </View>
+              <View style={styles.profileHeroCopy}>
+                <Text style={styles.eyebrow}>PERFIL PERSONAL</Text>
+                <Text style={styles.profileHeroTitle}>{profile.name || 'Tu perfil FitFlow'}</Text>
+                <Text style={styles.cardDescription}>Configura tus datos para recibir mejores rutinas y recomendaciones.</Text>
+              </View>
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Datos personales</Text>
+              <TextInput
+                value={profile.name}
+                onChangeText={(value) => updateProfileField('name', value)}
+                placeholder="Nombre completo"
+                placeholderTextColor="#5f8493"
+                style={styles.profileInput}
+              />
+              <TextInput
+                value={profile.email}
+                onChangeText={(value) => updateProfileField('email', value)}
+                placeholder="Correo electrónico"
+                placeholderTextColor="#5f8493"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={styles.profileInput}
+              />
+              <TextInput
+                value={profile.goals?.[0] ?? ''}
+                onChangeText={(value) => setProfile((current) => ({ ...current, goals: value ? [value] : [], updatedAt: new Date().toISOString() }))}
+                placeholder="Objetivo principal: fuerza, masa, resistencia..."
+                placeholderTextColor="#5f8493"
+                style={styles.profileInput}
+              />
+            </View>
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Nivel de entrenamiento</Text>
+              <View style={styles.intensityRow}>
+                {(['Principiante', 'Intermedio', 'Avanzado'] as const).map((level) => (
+                  <Pressable
+                    key={level}
+                    onPress={() => updateProfileField('level', level)}
+                    style={[styles.intensityButton, profile.level === level && styles.intensityButtonActive]}
+                  >
+                    <Text style={[styles.intensityText, profile.level === level && styles.intensityTextActive]}>{level}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.sectionTitle}>Equipo disponible</Text>
+              <View style={styles.chipWrap}>
+                {equipmentList.map((item) => {
+                  const active = selectedEquipment.includes(item);
+                  return (
+                    <Pressable key={item} onPress={() => toggleEquipment(item)} style={[styles.chip, active && styles.chipActive]}>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{item}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable onPress={() => void saveProfile()} style={styles.primaryButton}>
+                <Text style={styles.primaryButtonText}>Guardar perfil</Text>
+              </Pressable>
+              {profileMessage ? <Text style={styles.assignmentMessage}>{profileMessage}</Text> : null}
+            </View>
+          </View>
+        ) : null}
 
         {activeScreen === 'trainer' ? (
           <View style={styles.card}>
@@ -965,7 +1084,7 @@ export default function App() {
           </View>
         ) : null}
 
-        {activeScreen !== 'trainer' && activeScreen !== 'routines' && activeScreen !== 'trainerPanel' ? <View>
+        {activeScreen !== 'trainer' && activeScreen !== 'routines' && activeScreen !== 'trainerPanel' && activeScreen !== 'profile' ? <View>
         {activeScreen === 'modify' ? <>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Equipo disponible</Text>
@@ -1364,6 +1483,55 @@ const styles = StyleSheet.create({
     color: '#7ed8ff',
     fontSize: 10,
     fontWeight: '900',
+  },
+  profileGrid: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+  },
+  profileHero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#143443',
+    borderWidth: 1,
+    borderColor: '#28627a',
+    borderRadius: 14,
+    padding: 22,
+    marginBottom: 16,
+  },
+  profileAvatar: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#ffcf3f',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  profileAvatarText: {
+    color: '#18242a',
+    fontSize: 28,
+    fontWeight: '900',
+  },
+  profileHeroCopy: {
+    flex: 1,
+  },
+  profileHeroTitle: {
+    color: '#f5fbff',
+    fontSize: 24,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  profileInput: {
+    backgroundColor: '#0c1b23',
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#315161',
+    color: '#f2fbff',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    marginBottom: 10,
   },
   header: {
     marginBottom: 18,

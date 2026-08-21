@@ -7,6 +7,7 @@ import type {
   RoutineOwnerRole,
   RoutineTemplate,
   TrainerAssignment,
+  UserProfile,
 } from '../types/user';
 
 type ProgressState = {
@@ -21,7 +22,18 @@ const STORAGE_KEYS = {
   trainerAssignments: 'gymflow-trainer-assignments-v1',
   routineAssignments: 'gymflow-routine-assignments-v1',
   routineTemplates: 'gymflow-routine-templates-v1',
+  profile: 'gymflow-profile-v1',
 } as const;
+
+export const loadUserProfile = async (): Promise<UserProfile | null> => {
+  const saved = await AsyncStorage.getItem(STORAGE_KEYS.profile);
+  if (!saved) return null;
+  return JSON.parse(saved) as UserProfile;
+};
+
+export const saveUserProfile = async (profile: UserProfile) => {
+  await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
+};
 
 export const loadProgressState = async (): Promise<ProgressState | null> => {
   const saved = await AsyncStorage.getItem(STORAGE_KEYS.progress);

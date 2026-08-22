@@ -3,15 +3,15 @@ import { getFirestore, Firestore } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import { getAnalytics, Analytics, isSupported } from 'firebase/analytics';
 
-// Configuración de tu proyecto Firebase
+// Configuración pública del proyecto Firebase desde el entorno local o de despliegue.
 const firebaseConfig = {
-  apiKey: 'AIzaSyDs24ci0yfB_7mn2YwOuUssYnlCHYb70kc',
-  authDomain: 'fitflow-motoriaverse.firebaseapp.com',
-  projectId: 'fitflow-motoriaverse',
-  storageBucket: 'fitflow-motoriaverse.firebasestorage.app',
-  messagingSenderId: '928868755426',
-  appId: '1:928868755426:web:7ed5e23b9d61f16936bbbb',
-  measurementId: 'G-TW3G2DX6NH',
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
 // Inicializar Firebase solo una vez

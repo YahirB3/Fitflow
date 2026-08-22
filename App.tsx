@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Animated,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -11,6 +13,8 @@ import {
   Image,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import { equipmentList, getExerciseImage, intensityLabel, intensityMultiplier, type EquipmentName } from './src/constants/workoutData';
 import type { Exercise, ExerciseProgress, Intensity, RoutineDay, WeeklySummary } from './src/types/workout';
@@ -34,7 +38,18 @@ import {
   saveUserProfile,
   updateTrainerAssignmentStatus,
 } from './src/services/workoutStorage';
+import {
+  loginUser,
+  loginWithGoogleIdToken,
+  loginWithGoogleWeb,
+  logoutUser,
+  onAuthStateChange,
+  registerUser,
+} from './src/services/authService';
 import type { RoutineAssignment, RoutineTemplate, TrainerAssignment, UserProfile } from './src/types/user';
+import type { User as FirebaseUser } from 'firebase/auth';
+
+WebBrowser.maybeCompleteAuthSession();
 
 
 const getWeekStart = (date: Date) => {
@@ -186,6 +201,7 @@ const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
   Object.values(progress).filter((item) => item.done).length;
 
 type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel' | 'profile';
+type AuthMode = 'login' | 'register';
 
 const getTodayName = () => {
   const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -245,6 +261,31 @@ export default function App() {
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
     normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
   );
+  const [sessionUser, setSessionUser] = useState<FirebaseUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+  const [authPromptVisible, setAuthPromptVisible] = useState(false);
+  const [authPromptText, setAuthPromptText] = useState('');
+  const authGlow = React.useRef(new Animated.Value(0)).current;
+  const authShake = React.useRef(new Animated.Value(0)).current;
+  const currentUserId = sessionUser?.uid ?? 'local-client';
+  const isGuest = !sessionUser;
+  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID;
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID;
+  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID;
+  const hasGoogleAuthConfig = Boolean(googleWebClientId || googleIosClientId || googleAndroidClientId);
+  const [, googleResponse, promptGoogleAuth] = Google.useAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID,
+    iosClientId: googleIosClientId,
+    androidClientId: googleAndroidClientId,
+    webClientId: googleWebClientId || 'missing-web-client-id.apps.googleusercontent.com',
+  });
 
   const routine = useMemo(
     () => normalizeRoutine(customRoutine, getRoutine(selectedEquipment, intensity)),
@@ -257,6 +298,51 @@ export default function App() {
   const todayPlan = routine.find((dayPlan) => dayPlan.day === todayName);
 
   useEffect(() => {
+    const unsubscribe = onAuthStateChange((user) => {
+      setSessionUser(user);
+      setAuthReady(true);
+      if (user) {
+        setAuthMessage('');
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const resolveGoogleAuth = async () => {
+      if (!googleResponse || Platform.OS === 'web') return;
+
+      if (googleResponse.type === 'success') {
+        const idToken =
+          googleResponse.authentication?.idToken
+          || (typeof googleResponse.params?.id_token === 'string' ? googleResponse.params.id_token : undefined);
+
+        if (!idToken) {
+          setAuthMessage('No se obtuvo token de Google.');
+          return;
+        }
+
+        try {
+          setGoogleAuthLoading(true);
+          setAuthMessage('');
+          await loginWithGoogleIdToken(idToken);
+          setAuthPromptVisible(false);
+          setAuthPromptText('');
+        } catch {
+          setAuthMessage('No se pudo iniciar con Google. Intenta de nuevo.');
+        } finally {
+          setGoogleAuthLoading(false);
+        }
+      }
+    };
+
+    void resolveGoogleAuth();
+  }, [googleResponse]);
+
+  useEffect(() => {
+    if (!authReady) return;
+
     const loadState = async () => {
       try {
         const saved = await loadProgressState();
@@ -286,17 +372,32 @@ export default function App() {
         setRoutineAssignments(savedRoutineAssignments);
         if (savedProfile) {
           setProfile(savedProfile);
+        } else if (sessionUser) {
+          setProfile((current) => ({
+            ...current,
+            id: currentUserId,
+            name: sessionUser.displayName ?? current.name,
+            email: sessionUser.email ?? current.email,
+            updatedAt: new Date().toISOString(),
+          }));
         }
         if (sharedRoutine) {
-          const importedTemplate = await createRoutineTemplate(
-            'local-client',
-            sharedRoutine.title,
-            sharedRoutine.routine,
-            'user',
-          );
-          const templatesWithSharedRoutine = [...savedRoutineTemplates, importedTemplate];
-          setRoutineTemplates(templatesWithSharedRoutine);
-          setRoutineAssignmentMessage(`Se importó "${sharedRoutine.title}" desde el enlace.`);
+          if (sessionUser) {
+            const importedTemplate = await createRoutineTemplate(
+              currentUserId,
+              sharedRoutine.title,
+              sharedRoutine.routine,
+              'user',
+            );
+            const templatesWithSharedRoutine = [...savedRoutineTemplates, importedTemplate];
+            setRoutineTemplates(templatesWithSharedRoutine);
+            setRoutineAssignmentMessage(`Se importó "${sharedRoutine.title}" desde el enlace.`);
+          } else {
+            const previewRoutine = normalizeRoutine(sharedRoutine.routine, routine);
+            setCustomRoutine(previewRoutine);
+            setEditorRoutine(previewRoutine);
+            setRoutineAssignmentMessage('Estás viendo una rutina compartida. Regístrate para guardarla o editarla.');
+          }
           if (typeof window !== 'undefined') {
             window.history.replaceState({}, '', window.location.pathname);
           }
@@ -333,7 +434,32 @@ export default function App() {
     };
 
     void loadState();
-  }, []);
+  }, [authReady, sessionUser, currentUserId]);
+
+  const requireAuthForAction = (actionLabel: string) => {
+    if (!isGuest) return true;
+    setAuthMode('login');
+    setAuthPromptText(`Para ${actionLabel}, inicia sesión.`);
+    setAuthMessage('');
+    setAuthPromptVisible(true);
+    authGlow.setValue(0);
+    authShake.setValue(0);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(authGlow, { toValue: 1, duration: 170, useNativeDriver: false }),
+        Animated.timing(authGlow, { toValue: 0.2, duration: 170, useNativeDriver: false }),
+        Animated.timing(authGlow, { toValue: 1, duration: 170, useNativeDriver: false }),
+      ]),
+      Animated.sequence([
+        Animated.timing(authShake, { toValue: -1, duration: 60, useNativeDriver: true }),
+        Animated.timing(authShake, { toValue: 1, duration: 60, useNativeDriver: true }),
+        Animated.timing(authShake, { toValue: -0.6, duration: 60, useNativeDriver: true }),
+        Animated.timing(authShake, { toValue: 0.6, duration: 60, useNativeDriver: true }),
+        Animated.timing(authShake, { toValue: 0, duration: 60, useNativeDriver: true }),
+      ]),
+    ]).start();
+    return false;
+  };
 
   useEffect(() => {
     const saveState = async () => {
@@ -364,12 +490,14 @@ export default function App() {
   }, [history]);
 
   const toggleEquipment = (item: EquipmentName) => {
+    if (!requireAuthForAction('modificar tu equipo')) return;
     setSelectedEquipment((current) =>
       current.includes(item) ? current.filter((value) => value !== item) : [...current, item],
     );
   };
 
   const toggleExerciseDone = (day: string, exerciseName: string, index: number) => {
+    if (!requireAuthForAction('registrar progreso')) return;
     const key = getExerciseKey(day, exerciseName, index);
     setWeekProgress((current) => ({
       ...current,
@@ -381,6 +509,7 @@ export default function App() {
   };
 
   const updateWeight = (day: string, exerciseName: string, index: number, weightIndex: number, value: string) => {
+    if (!requireAuthForAction('guardar pesos')) return;
     const key = getExerciseKey(day, exerciseName, index);
     setWeekProgress((current) => {
       const prev = current[key] ?? { done: false, weights: [''] };
@@ -397,6 +526,7 @@ export default function App() {
   };
 
   const addWeightEntry = (day: string, exerciseName: string, index: number) => {
+    if (!requireAuthForAction('agregar pesos')) return;
     const key = getExerciseKey(day, exerciseName, index);
     setWeekProgress((current) => {
       const prev = current[key] ?? { done: false, weights: [''] };
@@ -411,6 +541,7 @@ export default function App() {
   };
 
   const removeWeightEntry = (day: string, exerciseName: string, index: number, weightIndex: number) => {
+    if (!requireAuthForAction('editar pesos')) return;
     const key = getExerciseKey(day, exerciseName, index);
     setWeekProgress((current) => {
       const prev = current[key] ?? { done: false, weights: [''] };
@@ -426,6 +557,7 @@ export default function App() {
   };
 
   const resetCurrentWeek = async () => {
+    if (!requireAuthForAction('reiniciar tu semana')) return;
     const summary: WeeklySummary = {
       weekKey: savedWeekKey,
       label: getWeekLabel(savedWeekKey),
@@ -440,6 +572,7 @@ export default function App() {
   };
 
   const openWeekEditor = () => {
+    if (!requireAuthForAction('editar la rutina')) return;
     const safeRoutine = normalizeRoutine(routine, getRoutine(selectedEquipment, intensity));
     setEditorRoutine(
       safeRoutine.map((day) => ({
@@ -453,18 +586,21 @@ export default function App() {
   };
 
   const createCustomRoutine = () => {
+    if (!requireAuthForAction('crear una rutina')) return;
     setSelectedEditRoutineId('new');
     setEditorRoutine(createBlankRoutine());
     setIsEditingWeek(true);
   };
 
   const editSelectedRoutine = (routineId: string, selectedRoutine: RoutineDay[]) => {
+    if (!requireAuthForAction('modificar una rutina')) return;
     setSelectedEditRoutineId(routineId);
     setEditorRoutine(normalizeRoutine(selectedRoutine, routine));
     setIsEditingWeek(true);
   };
 
   const updateEditorExercise = (dayIndex: number, exerciseIndex: number, field: 'name' | 'sets' | 'reps' | 'note' | 'image', value: string) => {
+    if (!requireAuthForAction('editar ejercicios')) return;
     setEditorRoutine((current) =>
       current.map((day, currentDayIndex) =>
         currentDayIndex !== dayIndex
@@ -482,6 +618,7 @@ export default function App() {
   };
 
   const addEditorExercise = (dayIndex: number) => {
+    if (!requireAuthForAction('agregar ejercicios')) return;
     setEditorRoutine((current) => current.map((day, currentDayIndex) => (
       currentDayIndex !== dayIndex
         ? day
@@ -496,6 +633,7 @@ export default function App() {
   };
 
   const removeEditorExercise = (dayIndex: number, exerciseIndex: number) => {
+    if (!requireAuthForAction('eliminar ejercicios')) return;
     setEditorRoutine((current) => current.map((day, currentDayIndex) => {
       if (currentDayIndex !== dayIndex || day.exercises.length <= 1) return day;
       return {
@@ -506,6 +644,7 @@ export default function App() {
   };
 
   const pickExerciseImage = async (dayIndex: number, exerciseIndex: number) => {
+    if (!requireAuthForAction('cambiar imágenes de ejercicios')) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -519,6 +658,7 @@ export default function App() {
   };
 
   const pickProfileImage = async () => {
+    if (!requireAuthForAction('cambiar foto de perfil')) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -537,6 +677,7 @@ export default function App() {
   };
 
   const saveCustomRoutine = async () => {
+    if (!requireAuthForAction('guardar una rutina')) return;
     const safeRoutine = normalizeRoutine(editorRoutine, routine);
     setCustomRoutine(safeRoutine);
     setIsEditingWeek(false);
@@ -547,6 +688,7 @@ export default function App() {
   };
   
   const resetRoutineToDefault = async () => {
+    if (!requireAuthForAction('restablecer la rutina')) return;
     const nextRoutine = normalizeRoutine(getRoutine(selectedEquipment, intensity), routine);
     setCustomRoutine(null);
     setEditorRoutine(nextRoutine);
@@ -557,6 +699,7 @@ export default function App() {
   };
 
   const sendTrainerRequest = async () => {
+    if (!requireAuthForAction('enviar solicitudes a entrenador')) return;
     const normalizedCode = trainerCode.trim().toUpperCase();
     if (normalizedCode.length < 4) {
       setAssignmentMessage('Escribe un código de al menos 4 caracteres.');
@@ -571,13 +714,14 @@ export default function App() {
       return;
     }
 
-    const assignment = await createTrainerAssignment(normalizedCode, 'local-client');
+    const assignment = await createTrainerAssignment(normalizedCode, currentUserId);
     setTrainerAssignments((current) => [...current, assignment]);
     setTrainerCode('');
     setAssignmentMessage('Solicitud enviada. El entrenador debe aceptarla.');
   };
 
   const changeAssignmentStatus = async (assignmentId: string, status: 'active' | 'rejected') => {
+    if (!requireAuthForAction('gestionar solicitudes')) return;
     const updatedAssignment = await updateTrainerAssignmentStatus(assignmentId, status);
     if (!updatedAssignment) return;
 
@@ -587,6 +731,7 @@ export default function App() {
   };
 
   const endTrainerConnection = async (assignmentId: string) => {
+    if (!requireAuthForAction('terminar conexiones')) return;
     const updatedAssignment = await updateTrainerAssignmentStatus(assignmentId, 'ended');
     if (!updatedAssignment) return;
 
@@ -597,18 +742,21 @@ export default function App() {
   };
 
   const deleteSavedRoutine = async (templateId: string) => {
+    if (!requireAuthForAction('eliminar rutinas')) return;
     await removeRoutineTemplate(templateId);
     setRoutineTemplates((current) => current.filter((template) => template.id !== templateId));
     setRoutineAssignmentMessage('La rutina guardada fue eliminada.');
   };
 
   const deleteRoutineFromHistory = async (assignmentId: string) => {
+    if (!requireAuthForAction('eliminar historial')) return;
     await removeRoutineAssignment(assignmentId);
     setRoutineAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
     setRoutineAssignmentMessage('La rutina del historial fue eliminada.');
   };
 
   const assignRoutineToClient = async (clientAssignment: TrainerAssignment) => {
+    if (!requireAuthForAction('asignar rutinas')) return;
     const title = routineTitle.trim();
     if (!title) {
       setRoutineAssignmentMessage('Escribe un nombre para la rutina.');
@@ -629,18 +777,20 @@ export default function App() {
   };
 
   const saveCurrentRoutineAsTemplate = async () => {
+    if (!requireAuthForAction('guardar plantillas')) return;
     const title = routineTitle.trim();
     if (!title) {
       setRoutineAssignmentMessage('Escribe un nombre para guardar la plantilla.');
       return;
     }
 
-    const template = await createRoutineTemplate('local-trainer', title, routine);
+    const template = await createRoutineTemplate(currentUserId, title, routine);
     setRoutineTemplates((current) => [...current, template]);
     setRoutineAssignmentMessage(`Plantilla "${template.title}" guardada.`);
   };
 
   const assignTemplateToClient = async (template: RoutineTemplate, clientAssignment: TrainerAssignment) => {
+    if (!requireAuthForAction('asignar plantillas')) return;
     const routineAssignment = await createRoutineAssignment(
       clientAssignment.trainerId,
       clientAssignment.clientId,
@@ -656,13 +806,14 @@ export default function App() {
   };
 
   const saveCurrentRoutineAsUserTemplate = async () => {
+    if (!requireAuthForAction('guardar tu rutina')) return;
     const title = routineTitle.trim();
     if (!title) {
       setRoutineAssignmentMessage('Escribe un nombre para guardar tu rutina.');
       return;
     }
 
-    const template = await createRoutineTemplate('local-client', title, routine, 'user');
+    const template = await createRoutineTemplate(currentUserId, title, routine, 'user');
     setRoutineTemplates((current) => [...current, template]);
     setRoutineAssignmentMessage(`Tu rutina "${template.title}" quedó guardada.`);
   };
@@ -691,6 +842,7 @@ export default function App() {
   };
 
   const activateUserRoutine = async (template: RoutineTemplate) => {
+    if (!requireAuthForAction('usar esta rutina')) return;
     const nextRoutine = normalizeRoutine(template.routine, routine);
     setCustomRoutine(nextRoutine);
     setEditorRoutine(nextRoutine);
@@ -701,6 +853,7 @@ export default function App() {
   };
 
   const activateAssignedRoutine = async (assignment: RoutineAssignment) => {
+    if (!requireAuthForAction('activar rutinas asignadas')) return;
     const nextRoutine = normalizeRoutine(assignment.routine, routine);
     setCustomRoutine(nextRoutine);
     setEditorRoutine(nextRoutine);
@@ -716,6 +869,7 @@ export default function App() {
   };
 
   const saveProfile = async () => {
+    if (!requireAuthForAction('guardar perfil')) return;
     if (!profile.name.trim() || !profile.email.trim()) {
       setProfileMessage('Completa tu nombre y correo para guardar el perfil.');
       return;
@@ -723,6 +877,7 @@ export default function App() {
 
     const nextProfile = {
       ...profile,
+      id: currentUserId,
       name: profile.name.trim(),
       email: profile.email.trim(),
       equipment: selectedEquipment,
@@ -732,6 +887,104 @@ export default function App() {
     await saveUserProfile(nextProfile);
     setProfileMessage('Perfil guardado correctamente.');
   };
+
+  const submitAuth = async () => {
+    const email = authEmail.trim();
+    const password = authPassword.trim();
+    const name = authName.trim();
+
+    if (!email || !password) {
+      setAuthMessage('Completa correo y contraseña.');
+      return;
+    }
+
+    if (authMode === 'register' && !name) {
+      setAuthMessage('Escribe tu nombre para registrarte.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthMessage('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    try {
+      setAuthLoading(true);
+      setAuthMessage('');
+
+      if (authMode === 'register') {
+        await registerUser(email, password, name);
+      } else {
+        await loginUser(email, password);
+      }
+      setAuthPromptVisible(false);
+      setAuthName('');
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthPromptText('');
+    } catch (error: any) {
+      const code = String(error?.code ?? '');
+      if (code.includes('auth/invalid-credential')) {
+        setAuthMessage('Correo o contraseña incorrectos.');
+      } else if (code.includes('auth/email-already-in-use')) {
+        setAuthMessage('Ese correo ya está registrado.');
+      } else if (code.includes('auth/weak-password')) {
+        setAuthMessage('La contraseña es muy débil.');
+      } else if (code.includes('auth/invalid-email')) {
+        setAuthMessage('El correo no es válido.');
+      } else {
+        setAuthMessage('No se pudo autenticar. Intenta de nuevo.');
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const submitGoogleAuth = async () => {
+    try {
+      setAuthMessage('');
+      setGoogleAuthLoading(true);
+
+      if (!hasGoogleAuthConfig) {
+        setAuthMessage('Falta configurar Google OAuth en variables de entorno.');
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        await loginWithGoogleWeb();
+        setAuthPromptVisible(false);
+        setAuthPromptText('');
+      } else {
+        await promptGoogleAuth();
+      }
+    } catch {
+      setAuthMessage('No se pudo iniciar con Google. Verifica la configuración.');
+    } finally {
+      if (Platform.OS === 'web') {
+        setGoogleAuthLoading(false);
+      }
+    }
+  };
+
+  const signOutCurrentUser = async () => {
+    try {
+      await logoutUser();
+      setProfileMessage('Sesión cerrada.');
+    } catch {
+      setProfileMessage('No se pudo cerrar sesión.');
+    }
+  };
+
+  if (!authReady) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.authWrapper}>
+          <Text style={styles.pageTitle}>Cargando FitFlow...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -803,8 +1056,22 @@ export default function App() {
             <Text style={styles.eyebrow}>TU ESPACIO DE ENTRENAMIENTO</Text>
             <Text style={styles.pageTitle}>{activeScreen === 'today' ? 'Entrenamiento de hoy' : activeScreen === 'modify' ? 'Diseña tu rutina' : activeScreen === 'routines' ? 'Tu biblioteca' : activeScreen === 'trainer' ? 'Tu coach' : activeScreen === 'profile' ? 'Mi perfil' : 'Centro del entrenador'}</Text>
           </View>
-          <View style={styles.topbarBadge}>
-            <Text style={styles.topbarBadgeText}>{progressPercent}% SEMANA</Text>
+          <View style={styles.topbarRight}>
+            <View style={styles.topbarBadge}>
+              <Text style={styles.topbarBadgeText}>{isGuest ? 'MODO INVITADO' : `${progressPercent}% SEMANA`}</Text>
+            </View>
+            {isGuest ? (
+              <Pressable
+                onPress={() => {
+                  setAuthMode('login');
+                  setAuthPromptText('Inicia sesión para guardar progreso y rutinas.');
+                  setAuthPromptVisible((current) => !current);
+                }}
+                style={styles.topbarAuthButton}
+              >
+                <Text style={styles.topbarAuthButtonText}>Empezar ahora</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -880,6 +1147,22 @@ export default function App() {
               <Pressable onPress={() => void saveProfile()} style={styles.primaryButton}>
                 <Text style={styles.primaryButtonText}>Guardar perfil</Text>
               </Pressable>
+              {sessionUser ? (
+                <Pressable onPress={() => void signOutCurrentUser()} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Cerrar sesión</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    setAuthMode('register');
+                    setAuthPromptText('Regístrate para guardar perfil y personalizar tu experiencia.');
+                    setAuthPromptVisible(true);
+                  }}
+                  style={styles.secondaryButton}
+                >
+                  <Text style={styles.secondaryButtonText}>Crear cuenta</Text>
+                </Pressable>
+              )}
               {profileMessage ? <Text style={styles.assignmentMessage}>{profileMessage}</Text> : null}
             </View>
           </View>
@@ -979,11 +1262,11 @@ export default function App() {
                 ))
             )}
             <Text style={styles.sectionTitle}>Rutinas de mis coaches</Text>
-            {routineAssignments.filter((assignment) => assignment.clientId === 'local-client').length === 0 ? (
+            {routineAssignments.filter((assignment) => assignment.clientId === currentUserId).length === 0 ? (
               <Text style={styles.emptyState}>Todavía no te han asignado una rutina.</Text>
             ) : (
               routineAssignments
-                .filter((assignment) => assignment.clientId === 'local-client')
+                .filter((assignment) => assignment.clientId === currentUserId)
                 .map((assignment) => (
                   <View key={assignment.id} style={styles.templateItem}>
                     <View style={styles.assignmentDetails}>
@@ -1173,7 +1456,7 @@ export default function App() {
                 </Pressable>
               ))}
             {routineAssignments
-              .filter((assignment) => assignment.clientId === 'local-client')
+              .filter((assignment) => assignment.clientId === currentUserId)
               .map((assignment) => (
                 <Pressable
                   key={`edit-assignment-${assignment.id}`}
@@ -1409,6 +1692,94 @@ export default function App() {
         </View>
         </View> : null}
       </ScrollView>
+        {isGuest && authPromptVisible ? (
+          <View style={styles.authOverlayContainer}>
+            <Animated.View
+              style={[
+                styles.authFloatingPanel,
+                {
+                  borderColor: authGlow.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['#29434f', '#7ed8ff'],
+                  }),
+                  transform: [{ translateX: authShake.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] }) }],
+                  shadowOpacity: authGlow.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.42] }),
+                },
+              ]}
+            >
+              <Text style={styles.eyebrow}>MODO INVITADO</Text>
+              <Text style={styles.sectionTitle}>{authMode === 'register' ? 'Crear cuenta para editar' : 'Empezar ahora'}</Text>
+              {authPromptText ? <Text style={styles.cardDescription}>{authPromptText}</Text> : null}
+
+              {authMode === 'register' ? (
+                <TextInput
+                  value={authName}
+                  onChangeText={(value) => {
+                    setAuthName(value);
+                    setAuthMessage('');
+                  }}
+                  placeholder="Nombre"
+                  placeholderTextColor="#5f8493"
+                  style={styles.profileInput}
+                />
+              ) : null}
+
+              <TextInput
+                value={authEmail}
+                onChangeText={(value) => {
+                  setAuthEmail(value);
+                  setAuthMessage('');
+                }}
+                placeholder="Correo"
+                placeholderTextColor="#5f8493"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={styles.profileInput}
+              />
+
+              <TextInput
+                value={authPassword}
+                onChangeText={(value) => {
+                  setAuthPassword(value);
+                  setAuthMessage('');
+                }}
+                placeholder="Contraseña"
+                placeholderTextColor="#5f8493"
+                secureTextEntry
+                style={styles.profileInput}
+              />
+
+              <View style={styles.summaryRow}>
+                <Pressable onPress={() => void submitAuth()} style={styles.primaryButton}>
+                  <Text style={styles.primaryButtonText}>
+                      {authLoading ? 'Procesando...' : authMode === 'register' ? 'Crear cuenta' : 'Empezar ahora'}
+                  </Text>
+                </Pressable>
+                <Pressable onPress={() => setAuthPromptVisible(false)} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Seguir viendo</Text>
+                </Pressable>
+              </View>
+
+              <Pressable onPress={() => void submitGoogleAuth()} style={styles.googleButton}>
+                <Text style={styles.googleButtonText}>{googleAuthLoading ? 'Conectando con Google...' : 'Continuar con Google'}</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setAuthMode((current) => (current === 'login' ? 'register' : 'login'));
+                  setAuthMessage('');
+                }}
+                style={styles.authSwitchButton}
+              >
+                <Text style={styles.authSwitchText}>
+                  {authMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
+                </Text>
+              </Pressable>
+
+              {authMessage ? <Text style={styles.assignmentMessage}>{authMessage}</Text> : null}
+            </Animated.View>
+          </View>
+        ) : null}
         </View>
       </View>
     </SafeAreaView>
@@ -1419,6 +1790,38 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0b151d',
+  },
+  authWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  authCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#10232c',
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#29434f',
+  },
+  authCardInline: {
+    backgroundColor: '#10232c',
+    borderRadius: 14,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#29434f',
+  },
+  authSwitchButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  authSwitchText: {
+    color: '#7ed8ff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   appShell: {
     flex: 1,
@@ -1484,6 +1887,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 24,
   },
+  topbarRight: {
+    position: 'relative',
+    alignItems: 'flex-end',
+  },
   eyebrow: {
     color: '#27b6f2',
     fontSize: 10,
@@ -1508,6 +1915,39 @@ const styles = StyleSheet.create({
     color: '#7ed8ff',
     fontSize: 10,
     fontWeight: '900',
+  },
+  topbarAuthButton: {
+    marginTop: 8,
+    backgroundColor: '#274353',
+    borderWidth: 1,
+    borderColor: '#3b6d84',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  topbarAuthButtonText: {
+    color: '#d8f4ff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  authFloatingPanel: {
+    width: 380,
+    backgroundColor: '#10232c',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    shadowColor: '#7ed8ff',
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 16,
+    elevation: 7,
+    zIndex: 40,
+  },
+  authOverlayContainer: {
+    position: 'absolute',
+    top: 28,
+    right: 24,
+    zIndex: 300,
+    elevation: 30,
   },
   profileGrid: {
     width: '100%',
@@ -2101,6 +2541,21 @@ const styles = StyleSheet.create({
     color: '#071923',
     fontWeight: '800',
     fontSize: 12,
+  },
+  googleButton: {
+    marginTop: 10,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  googleButtonText: {
+    color: '#0f172a',
+    fontWeight: '800',
+    fontSize: 12,
+    textAlign: 'center',
   },
   secondaryButton: {
     backgroundColor: '#29434f',

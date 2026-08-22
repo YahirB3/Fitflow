@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Animated,
   Platform,
-  Pressable,
+  Pressable as NativePressable,
   SafeAreaView,
   ScrollView,
   Share,
@@ -203,6 +203,111 @@ const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
 
 type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel' | 'profile';
 type AuthMode = 'login' | 'register';
+
+const AnimatedSection = ({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) => {
+  const motion = React.useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    motion.setValue(0);
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.timing(motion, {
+        toValue: 1,
+        duration: 360,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+  }, [delay, motion]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: motion,
+        transform: [{ translateY: motion.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] }) }],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+};
+
+const AnimatedButton = ({ children, style, onPress, ...props }: React.ComponentProps<typeof NativePressable>) => {
+  const scale = React.useRef(new Animated.Value(1)).current;
+  const [isPressed, setIsPressed] = React.useState(false);
+  const [isReleasing, setIsReleasing] = React.useState(false);
+
+  const animateScale = (toValue: number) => {
+    Animated.spring(scale, {
+      toValue,
+      friction: 7,
+      tension: 160,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  };
+
+  return (
+    <NativePressable
+      {...props}
+      onPress={onPress}
+      onPressIn={() => {
+        setIsPressed(true);
+        animateScale(0.94);
+      }}
+      onPressOut={() => {
+        setIsPressed(false);
+        setIsReleasing(true);
+        animateScale(1.04);
+        setTimeout(() => {
+          setIsReleasing(false);
+          animateScale(1);
+        }, 170);
+      }}
+      style={typeof style === 'function'
+        ? (state) => [style(state), { transform: [{ scale: isPressed ? 0.94 : isReleasing ? 1.04 : 1 }], opacity: isPressed ? 0.68 : 1 }]
+        : [style, { transform: [{ scale: isPressed ? 0.94 : isReleasing ? 1.04 : 1 }], opacity: isPressed ? 0.68 : 1 }]}
+    >
+      {children}
+    </NativePressable>
+  );
+};
+
+const Pressable = AnimatedButton;
+
+const AnimatedCheckmark = ({ visible }: { visible: boolean }) => {
+  const motion = React.useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) {
+      motion.setValue(0);
+      return;
+    }
+
+    motion.setValue(0);
+    Animated.spring(motion, {
+      toValue: 1,
+      friction: 5,
+      tension: 180,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [motion, visible]);
+
+  return (
+    <Animated.Text
+      style={[
+        styles.checkmark,
+        {
+          opacity: motion,
+          transform: [
+            { scale: motion.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] }) },
+            { rotate: motion.interpolate({ inputRange: [0, 1], outputRange: ['-35deg', '0deg'] }) },
+          ],
+        },
+      ]}
+    >
+      {visible ? '✓' : ''}
+    </Animated.Text>
+  );
+};
 
 const getTodayName = () => {
   const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -1061,13 +1166,13 @@ export default function App() {
               </Animated.View>
             ) : null}
             {!isCompactLayout ? (
-              <Pressable
+              <AnimatedButton
                 accessibilityLabel={sidebarCollapsed ? 'Abrir barra lateral' : 'Cerrar barra lateral'}
                 onPress={toggleSidebar}
-                style={({ pressed }) => [styles.sidebarToggle, pressed && styles.buttonPressed]}
+                style={styles.sidebarToggle}
               >
                 <Text style={styles.sidebarToggleText}>{sidebarCollapsed ? '+' : '−'}</Text>
-              </Pressable>
+              </AnimatedButton>
             ) : null}
           </View>
           {sidebarContentVisible ? <Animated.View style={{ opacity: sidebarContentOpacity }}>
@@ -1138,18 +1243,14 @@ export default function App() {
               ['05', 'Panel', 'trainerPanel'],
               ['06', 'Perfil', 'profile'],
             ].map(([number, label, screen]) => (
-              <Pressable
+              <AnimatedButton
                 key={screen}
                 onPress={() => setActiveScreen(screen as AppScreen)}
-                style={({ pressed }) => [
-                  styles.mobileNavigationButton,
-                  activeScreen === screen && styles.mobileNavigationButtonActive,
-                  pressed && styles.buttonPressed,
-                ]}
+                style={[styles.mobileNavigationButton, activeScreen === screen && styles.mobileNavigationButtonActive]}
               >
                 <Text style={styles.mobileNavigationNumber}>{number}</Text>
                 <Text style={styles.mobileNavigationText}>{label}</Text>
-              </Pressable>
+              </AnimatedButton>
             ))}
           </ScrollView>
         ) : null}
@@ -1507,45 +1608,50 @@ export default function App() {
 
         {activeScreen !== 'trainer' && activeScreen !== 'routines' && activeScreen !== 'trainerPanel' && activeScreen !== 'profile' ? <View>
         {activeScreen === 'modify' ? <>
+        <AnimatedSection delay={0}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Equipo disponible</Text>
           <View style={styles.chipWrap}>
             {equipmentList.map((item) => {
               const active = selectedEquipment.includes(item);
               return (
-                <Pressable
+                <AnimatedButton
                   key={item}
                   onPress={() => toggleEquipment(item)}
                   style={[styles.chip, active && styles.chipActive]}
                 >
                   <Text style={[styles.chipText, active && styles.chipTextActive]}>{item}</Text>
-                </Pressable>
+                </AnimatedButton>
               );
             })}
           </View>
         </View>
+        </AnimatedSection>
 
+        <AnimatedSection delay={90}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Intensidad</Text>
           <View style={styles.intensityRow}>
             {(['Baja', 'Media', 'Alta', 'Máxima'] as Intensity[]).map((level) => (
-              <Pressable
+              <AnimatedButton
                 key={level}
                 onPress={() => setIntensity(level)}
                 style={[styles.intensityButton, level === intensity && styles.intensityButtonActive]}
               >
                 <Text style={[styles.intensityText, level === intensity && styles.intensityTextActive]}>{level}</Text>
-              </Pressable>
+              </AnimatedButton>
             ))}
           </View>
           <Text style={styles.intensityDescription}>{intensityLabel[intensity]}</Text>
         </View>
+        </AnimatedSection>
 
+        <AnimatedSection delay={180}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Plan semanal</Text>
           <Text style={styles.cardDescription}>¿Qué rutina quieres modificar?</Text>
           <View style={styles.routineOptions}>
-            <Pressable
+            <AnimatedButton
               onPress={() => editSelectedRoutine('default', getRoutine(selectedEquipment, intensity))}
               style={[styles.routineOption, selectedEditRoutineId === 'default' && styles.routineOptionActive]}
             >
@@ -1553,11 +1659,11 @@ export default function App() {
                 Rutina default
               </Text>
               <Text style={styles.routineOptionMeta}>Generada por FitFlow</Text>
-            </Pressable>
+            </AnimatedButton>
             {routineTemplates
               .filter((template) => template.ownerRole === 'user')
               .map((template) => (
-                <Pressable
+                <AnimatedButton
                   key={`edit-template-${template.id}`}
                   onPress={() => editSelectedRoutine(template.id, template.routine)}
                   style={[styles.routineOption, selectedEditRoutineId === template.id && styles.routineOptionActive]}
@@ -1566,12 +1672,12 @@ export default function App() {
                     {template.title}
                   </Text>
                   <Text style={styles.routineOptionMeta}>Rutina guardada</Text>
-                </Pressable>
+                </AnimatedButton>
               ))}
             {routineAssignments
               .filter((assignment) => assignment.clientId === currentUserId)
               .map((assignment) => (
-                <Pressable
+                <AnimatedButton
                   key={`edit-assignment-${assignment.id}`}
                   onPress={() => editSelectedRoutine(assignment.id, assignment.routine)}
                   style={[styles.routineOption, selectedEditRoutineId === assignment.id && styles.routineOptionActive]}
@@ -1580,9 +1686,9 @@ export default function App() {
                     {assignment.title}
                   </Text>
                   <Text style={styles.routineOptionMeta}>Rutina del coach</Text>
-                </Pressable>
+                </AnimatedButton>
               ))}
-            <Pressable
+            <AnimatedButton
               onPress={createCustomRoutine}
               style={[styles.routineOption, selectedEditRoutineId === 'new' && styles.routineOptionActive]}
             >
@@ -1590,30 +1696,32 @@ export default function App() {
                 Crear nueva
               </Text>
               <Text style={styles.routineOptionMeta}>Empieza desde cero</Text>
-            </Pressable>
+            </AnimatedButton>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.progressText}>
               {customRoutine ? 'Rutina personalizada' : 'Rutina default generada'}
             </Text>
-            <Pressable onPress={openWeekEditor} style={styles.resetButton}>
+            <AnimatedButton onPress={openWeekEditor} style={styles.resetButton}>
               <Text style={styles.resetButtonText}>
                 {customRoutine ? 'Editar rutina' : 'Modificar default'}
               </Text>
-            </Pressable>
+            </AnimatedButton>
           </View>
           {customRoutine ? (
-            <Pressable onPress={resetRoutineToDefault} style={styles.defaultButton}>
+            <AnimatedButton onPress={resetRoutineToDefault} style={styles.defaultButton}>
               <Text style={styles.defaultButtonText}>Usar rutina default</Text>
-            </Pressable>
+            </AnimatedButton>
           ) : (
-            <Pressable onPress={createCustomRoutine} style={styles.defaultButton}>
+            <AnimatedButton onPress={createCustomRoutine} style={styles.defaultButton}>
               <Text style={styles.defaultButtonText}>Crear rutina propia</Text>
-            </Pressable>
+            </AnimatedButton>
           )}
         </View>
+        </AnimatedSection>
 
         {isEditingWeek ? (
+          <AnimatedSection delay={270}>
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Modificar ejercicios de la semana</Text>
             {editorRoutine.map((dayPlan, dayIndex) => (
@@ -1634,12 +1742,12 @@ export default function App() {
                   <View key={`${dayPlan.day}-${exercise.name}-${exerciseIndex}`} style={styles.editorExerciseCard}>
                     <View style={styles.editorExerciseHeader}>
                       <Text style={styles.editorExerciseLabel}>Ejercicio {exerciseIndex + 1}</Text>
-                      <Pressable
+                      <AnimatedButton
                         onPress={() => removeEditorExercise(dayIndex, exerciseIndex)}
                         style={styles.removeExerciseButton}
                       >
                         <Text style={styles.removeExerciseText}>Eliminar</Text>
-                      </Pressable>
+                      </AnimatedButton>
                     </View>
                     <TextInput
                       value={exercise.name}
@@ -1675,28 +1783,29 @@ export default function App() {
                       autoCapitalize="none"
                       style={styles.editorInput}
                     />
-                    <Pressable
+                    <AnimatedButton
                       onPress={() => void pickExerciseImage(dayIndex, exerciseIndex)}
                       style={styles.imagePickerButton}
                     >
                       <Text style={styles.imagePickerButtonText}>Elegir imagen desde el dispositivo</Text>
-                    </Pressable>
+                    </AnimatedButton>
                   </View>
                 ))}
-                <Pressable onPress={() => addEditorExercise(dayIndex)} style={styles.addExerciseButton}>
+                <AnimatedButton onPress={() => addEditorExercise(dayIndex)} style={styles.addExerciseButton}>
                   <Text style={styles.addExerciseText}>+ Agregar otro ejercicio</Text>
-                </Pressable>
+                </AnimatedButton>
               </View>
             ))}
             <View style={styles.summaryRow}>
-              <Pressable onPress={() => setIsEditingWeek(false)} style={styles.secondaryButton}>
+              <AnimatedButton onPress={() => setIsEditingWeek(false)} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Cancelar</Text>
-              </Pressable>
-              <Pressable onPress={saveCustomRoutine} style={styles.primaryButton}>
+              </AnimatedButton>
+              <AnimatedButton onPress={saveCustomRoutine} style={styles.primaryButton}>
                 <Text style={styles.primaryButtonText}>Guardar cambios</Text>
-              </Pressable>
+              </AnimatedButton>
             </View>
           </View>
+          </AnimatedSection>
         ) : null}
         </> : (
           <View style={styles.card}>
@@ -1712,7 +1821,7 @@ export default function App() {
           </View>
         )}
 
-        {activeScreen === 'modify' ? <View style={styles.card}>
+        {activeScreen === 'modify' ? <AnimatedSection delay={360}><View style={styles.card}>
           <Text style={styles.sectionTitle}>Progreso semanal</Text>
           <View style={styles.summaryRow}>
             <Text style={styles.progressText}>{completedExercises}/{totalExercises} ejercicios completados</Text>
@@ -1723,8 +1832,9 @@ export default function App() {
           <View style={styles.progressBarBackground}>
             <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
           </View>
-        </View> : null}
+        </View></AnimatedSection> : null}
 
+        <AnimatedSection delay={450}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Historial semanal</Text>
           {history.length === 0 ? (
@@ -1738,7 +1848,9 @@ export default function App() {
             ))
           )}
         </View>
+        </AnimatedSection>
 
+        <AnimatedSection delay={540}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Calendario semanal · {getWeekLabel(savedWeekKey)}</Text>
           {(activeScreen === 'today' ? (todayPlan ? [todayPlan] : []) : routine).map((dayPlan) => (
@@ -1763,7 +1875,7 @@ export default function App() {
                         onPress={() => toggleExerciseDone(dayPlan.day, exercise.name, exerciseIndex)}
                         style={[styles.checkbox, currentProgress.done && styles.checkboxActive]}
                       >
-                        {currentProgress.done ? <Text style={styles.checkmark}>✓</Text> : null}
+                        <AnimatedCheckmark visible={currentProgress.done} />
                       </Pressable>
 
                       <View style={styles.exerciseInfo}>
@@ -1803,6 +1915,7 @@ export default function App() {
             </View>
           ))}
         </View>
+        </AnimatedSection>
         </View> : null}
       </ScrollView>
         {isGuest && authPromptVisible ? (

@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Google from 'expo-auth-session/providers/google';
@@ -229,6 +230,13 @@ const readSharedRoutineFromUrl = (): { title: string; routine: RoutineDay[] } | 
 };
 
 export default function App() {
+  const { width: viewportWidth } = useWindowDimensions();
+  const isCompactLayout = viewportWidth < 860;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarContentVisible, setSidebarContentVisible] = useState(true);
+  const sidebarWidth = React.useRef(new Animated.Value(240)).current;
+  const sidebarContentOpacity = React.useRef(new Animated.Value(1)).current;
+  const pageMotion = React.useRef(new Animated.Value(0)).current;
   const currentWeekKey = getWeekKey(new Date());
   const [activeScreen, setActiveScreen] = useState<AppScreen>('today');
   const [selectedEquipment, setSelectedEquipment] = useState<EquipmentName[]>(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas']);
@@ -296,6 +304,46 @@ export default function App() {
   const progressPercent = totalExercises > 0 ? Math.round((completedExercises / totalExercises) * 100) : 0;
   const todayName = getTodayName();
   const todayPlan = routine.find((dayPlan) => dayPlan.day === todayName);
+
+  useEffect(() => {
+    pageMotion.setValue(0);
+    Animated.timing(pageMotion, {
+      toValue: 1,
+      duration: 560,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [activeScreen, pageMotion]);
+
+  const toggleSidebar = () => {
+    const nextCollapsed = !sidebarCollapsed;
+    if (nextCollapsed) {
+      Animated.timing(sidebarContentOpacity, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(() => {
+        setSidebarContentVisible(false);
+        setSidebarCollapsed(true);
+      });
+    } else {
+      setSidebarCollapsed(false);
+      setSidebarContentVisible(true);
+      sidebarContentOpacity.setValue(0);
+      Animated.sequence([
+        Animated.delay(180),
+        Animated.timing(sidebarContentOpacity, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]).start();
+    }
+    Animated.timing(sidebarWidth, {
+      toValue: nextCollapsed ? 112 : 240,
+      duration: 260,
+      useNativeDriver: false,
+    }).start();
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChange((user) => {
@@ -989,15 +1037,40 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
-      <View style={styles.appShell}>
-        <View style={styles.sidebar}>
-          <View style={styles.brandRow}>
-            <Image source={require('./assets/images/logo.png')} style={styles.logo} resizeMode="contain" />
-            <View>
-              <Text style={styles.title}>FitFlow</Text>
-              <Text style={styles.sidebarSubtitle}>FITNESS OS</Text>
-            </View>
+      <View style={[styles.appShell, isCompactLayout && styles.appShellCompact]}>
+        <Animated.View
+          style={[
+            styles.sidebar,
+            isCompactLayout && styles.sidebarCompact,
+            !isCompactLayout && sidebarCollapsed && styles.sidebarCollapsed,
+            { width: sidebarWidth },
+          ]}
+        >
+          <View style={[styles.brandRow, !isCompactLayout && sidebarCollapsed && styles.brandRowCollapsed]}>
+            <Image
+              source={require('./assets/images/logo.png')}
+              style={[styles.logo, !isCompactLayout && sidebarCollapsed && styles.logoCollapsed]}
+              resizeMode="contain"
+            />
+            {sidebarContentVisible ? (
+              <Animated.View style={{ opacity: sidebarContentOpacity }}>
+                <View style={styles.brandCopy}>
+                <Text style={styles.title} numberOfLines={1}>FitFlow</Text>
+                <Text style={styles.sidebarSubtitle}>FITNESS OS</Text>
+                </View>
+              </Animated.View>
+            ) : null}
+            {!isCompactLayout ? (
+              <Pressable
+                accessibilityLabel={sidebarCollapsed ? 'Abrir barra lateral' : 'Cerrar barra lateral'}
+                onPress={toggleSidebar}
+                style={({ pressed }) => [styles.sidebarToggle, pressed && styles.buttonPressed]}
+              >
+                <Text style={styles.sidebarToggleText}>{sidebarCollapsed ? '+' : '−'}</Text>
+              </Pressable>
+            ) : null}
           </View>
+          {sidebarContentVisible ? <Animated.View style={{ opacity: sidebarContentOpacity }}>
           <Text style={styles.sidebarLabel}>ENTRENAMIENTO</Text>
           <Pressable
             onPress={() => setActiveScreen('today')}
@@ -1047,16 +1120,56 @@ export default function App() {
             <Text style={styles.sidebarFooterTitle}>FOCUS MODE</Text>
             <Text style={styles.sidebarFooterText}>Construye constancia, una sesión a la vez.</Text>
           </View>
-        </View>
+          </Animated.View> : null}
+        </Animated.View>
 
-        <View style={styles.mainContent}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        {isCompactLayout ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.mobileNavigationScroll}
+            contentContainerStyle={styles.mobileNavigation}
+          >
+            {[
+              ['01', 'Hoy', 'today'],
+              ['02', 'Editar', 'modify'],
+              ['03', 'Rutinas', 'routines'],
+              ['04', 'Coach', 'trainer'],
+              ['05', 'Panel', 'trainerPanel'],
+              ['06', 'Perfil', 'profile'],
+            ].map(([number, label, screen]) => (
+              <Pressable
+                key={screen}
+                onPress={() => setActiveScreen(screen as AppScreen)}
+                style={({ pressed }) => [
+                  styles.mobileNavigationButton,
+                  activeScreen === screen && styles.mobileNavigationButtonActive,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text style={styles.mobileNavigationNumber}>{number}</Text>
+                <Text style={styles.mobileNavigationText}>{label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        <Animated.View
+          style={[
+            styles.mainContent,
+            {
+              opacity: pageMotion,
+              transform: [{ translateY: pageMotion.interpolate({ inputRange: [0, 1], outputRange: [-26, 0] }) }],
+            },
+          ]}
+        >
+        <ScrollView contentContainerStyle={[styles.scrollContent, isCompactLayout && styles.scrollContentCompact]}>
         <View style={styles.topbar}>
-          <View>
+          <View style={styles.topbarCopy}>
             <Text style={styles.eyebrow}>TU ESPACIO DE ENTRENAMIENTO</Text>
             <Text style={styles.pageTitle}>{activeScreen === 'today' ? 'Entrenamiento de hoy' : activeScreen === 'modify' ? 'Diseña tu rutina' : activeScreen === 'routines' ? 'Tu biblioteca' : activeScreen === 'trainer' ? 'Tu coach' : activeScreen === 'profile' ? 'Mi perfil' : 'Centro del entrenador'}</Text>
           </View>
-          <View style={styles.topbarRight}>
+          <View style={[styles.topbarRight, isCompactLayout && styles.topbarRightCompact]}>
             <View style={styles.topbarBadge}>
               <Text style={styles.topbarBadgeText}>{isGuest ? 'MODO INVITADO' : `${progressPercent}% SEMANA`}</Text>
             </View>
@@ -1697,6 +1810,7 @@ export default function App() {
             <Animated.View
               style={[
                 styles.authFloatingPanel,
+                isCompactLayout && { width: Math.max(280, viewportWidth - 24) },
                 {
                   borderColor: authGlow.interpolate({
                     inputRange: [0, 1],
@@ -1780,7 +1894,7 @@ export default function App() {
             </Animated.View>
           </View>
         ) : null}
-        </View>
+        </Animated.View>
       </View>
     </SafeAreaView>
   );
@@ -1828,13 +1942,92 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#0b151d',
   },
+  appShellCompact: {
+    flexDirection: 'column',
+  },
   sidebar: {
-    width: 220,
+    width: 240,
     backgroundColor: '#0f1e27',
     borderRightWidth: 1,
     borderRightColor: '#233b47',
     paddingHorizontal: 16,
     paddingVertical: 22,
+  },
+  sidebarCollapsed: {
+    width: 112,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  sidebarCompact: {
+    display: 'none',
+  },
+  brandCopy: {
+    flex: 1,
+  },
+  logoCollapsed: {
+    width: 48,
+    height: 48,
+    marginRight: 4,
+  },
+  sidebarToggle: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#173541',
+    borderWidth: 1,
+    borderColor: '#3b7f98',
+    borderRadius: 14,
+  },
+  sidebarToggleText: {
+    color: '#7ed8ff',
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 21,
+  },
+  buttonPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.96 }],
+  },
+  mobileNavigation: {
+    minWidth: '100%',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    gap: 4,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  mobileNavigationScroll: {
+    flexGrow: 0,
+    height: 66,
+  },
+  mobileNavigationButton: {
+    width: 58,
+    height: 52,
+    backgroundColor: '#132832',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#29434f',
+    paddingHorizontal: 4,
+    paddingVertical: 7,
+    alignItems: 'center',
+  },
+  mobileNavigationButtonActive: {
+    backgroundColor: '#1b566c',
+    borderColor: '#2ebcf2',
+  },
+  mobileNavigationNumber: {
+    color: '#5f8493',
+    fontSize: 9,
+    fontWeight: '900',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  mobileNavigationText: {
+    color: '#e2e8f0',
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   mainContent: {
     flex: 1,
@@ -1881,14 +2074,26 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
+  scrollContentCompact: {
+    paddingHorizontal: 14,
+    paddingTop: 16,
+  },
   topbar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 24,
   },
+  topbarCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
   topbarRight: {
     position: 'relative',
+    alignItems: 'flex-end',
+  },
+  topbarRightCompact: {
     alignItems: 'flex-end',
   },
   eyebrow: {
@@ -2048,6 +2253,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  brandRowCollapsed: {
+    justifyContent: 'center',
+    gap: 8,
   },
   logo: {
     width: 68,

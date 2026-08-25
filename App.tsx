@@ -121,51 +121,57 @@ const getRoutine = (selectedEquipment: EquipmentName[], intensity: Intensity): R
   const hasBarra = selectedEquipment.includes('Barra Olímpica');
   const hasMancuernas = selectedEquipment.includes('Mancuernas');
   const hasCardio = selectedEquipment.includes('Caminadora');
+  const sets = (base: number) => `${Math.max(2, Math.round(base * multiplier))} series`;
 
   const basePlan: RoutineDay[] = [
     {
       day: 'Lunes',
-      title: 'Pecho + triceps',
+      title: 'Pecho + tríceps',
       exercises: [
-        { name: hasBarra ? 'Press de banca' : 'Press con mancuernas', sets: `${Math.max(3, Math.round(4 * multiplier))} series`, reps: '8-10', note: 'bajada controlada y pausa corta al pecho' },
-        { name: hasMancuernas ? 'Press inclinado con mancuernas' : 'Press inclinado', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '8-10', note: 'trabajo de pecho superior y hombros' },
-        { name: 'Dips o extensión de tríceps', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '8-12', note: 'triceps fuerte y estable' },
+        { name: hasBarra ? 'Press de banca' : 'Press con mancuernas', sets: sets(4), reps: '6-10', note: 'empuje horizontal; baja con control y mantén los hombros estables' },
+        { name: hasMancuernas ? 'Press inclinado con mancuernas' : 'Press inclinado', sets: sets(3), reps: '8-12', note: 'pecho superior; evita despegar los hombros del banco' },
+        { name: hasMancuernas ? 'Fly de pecho' : 'Flexiones', sets: sets(3), reps: '10-15', note: 'acerca las manos con control sin perder la alineación del tronco' },
+        { name: 'Dips o extensión de tríceps', sets: sets(3), reps: '8-12', note: 'extensión de codo con movimiento estable y sin balanceo' },
       ],
     },
     {
       day: 'Martes',
       title: 'Piernas + fuerza',
       exercises: [
-        { name: hasBarra ? 'Sentadilla con barra' : 'Sentadilla goblet', sets: `${Math.max(4, Math.round(4 * multiplier))} series`, reps: '8-10', note: 'profundidad completa y espalda neutra' },
-        { name: hasBarra ? 'Peso muerto' : 'Peso muerto con mancuernas', sets: `${Math.max(3, Math.round(4 * multiplier))} series`, reps: '6-8', note: 'extensión de cadera explosiva y control' },
-        { name: hasCardio ? 'Caminata inclinada' : 'Step-ups', sets: `${Math.max(1, Math.round(1 * multiplier))} series`, reps: '12-15 min', note: 'cardio de base y calentamiento final' },
+        { name: hasBarra ? 'Sentadilla con barra' : 'Sentadilla goblet', sets: sets(4), reps: '6-10', note: 'dominante de rodilla; desciende con control y mantén la espalda neutra' },
+        { name: hasBarra ? 'Peso muerto' : 'Peso muerto con mancuernas', sets: sets(3), reps: '6-8', note: 'bisagra de cadera; activa glúteos sin redondear la espalda' },
+        { name: hasMancuernas ? 'Zancadas con mancuernas' : 'Step-ups', sets: sets(3), reps: '8-12 por pierna', note: 'trabajo unilateral; controla la rodilla y el equilibrio' },
+        { name: 'Puente de glúteos', sets: sets(3), reps: '12-15', note: 'extensión de cadera; pausa arriba sin arquear la zona lumbar' },
       ],
     },
     {
       day: 'Miércoles',
       title: 'Espalda + hombros',
       exercises: [
-        { name: hasBarra ? 'Dominadas o jalar barra' : 'Remo con banda', sets: `${Math.max(4, Math.round(4 * multiplier))} series`, reps: '6-10', note: 'aductores y espalda en tensión sostenida' },
-        { name: hasBarra ? 'Peso muerto rumano' : 'Peso muerto rumano con mancuernas', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '8-10', note: 'glúteos e isquios con control' },
-        { name: 'Press militar o press de hombro', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '8-10', note: 'hombros estables y fuerza horizontal' },
+        { name: hasBarra ? 'Dominadas o jalar barra' : 'Remo con banda', sets: sets(4), reps: '6-10', note: 'tracción vertical u horizontal; lleva los codos hacia atrás sin encoger hombros' },
+        { name: hasMancuernas ? 'Remo apoyado' : 'Remo con banda', sets: sets(3), reps: '8-12', note: 'espalda media; mantén el tronco estable durante todo el recorrido' },
+        { name: hasBarra ? 'Peso muerto rumano' : 'Peso muerto rumano con mancuernas', sets: sets(3), reps: '8-12', note: 'cadena posterior; siente tensión en isquios sin forzar el rango' },
+        { name: hasMancuernas ? 'Press militar con mancuernas' : 'Press de hombro', sets: sets(3), reps: '8-12', note: 'empuje vertical; costillas abajo y muñecas alineadas' },
       ],
     },
     {
       day: 'Jueves',
-      title: 'Volumen + resistencia',
+      title: 'Accesorios + resistencia',
       exercises: [
-        { name: hasMancuernas ? 'Curl biceps alterno' : 'Curl con banda', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '10-12', note: 'contracción lenta y control al subir' },
-        { name: 'Zancadas con mancuernas', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '10 por pierna', note: 'equilibrio, pelviana y fuerza estable' },
-        { name: hasCardio ? 'Intervalos en caminadora' : 'Burpees', sets: `${Math.max(4, Math.round(5 * multiplier))} series`, reps: '30s/30s', note: 'resistencia y tonificación total' },
+        { name: hasMancuernas ? 'Curl biceps alterno' : 'Curl con banda', sets: sets(3), reps: '10-15', note: 'flexión de codo; evita impulso y controla la bajada' },
+        { name: hasMancuernas ? 'Elevaciones laterales' : 'Band pull apart', sets: sets(3), reps: '12-15', note: 'hombro y postura; eleva hasta una posición cómoda' },
+        { name: hasCardio ? 'Intervalos en caminadora' : 'Burpees', sets: sets(4), reps: hasCardio ? '30s/30s' : '8-12', note: 'intervalos moderados; recupera lo suficiente para mantener técnica' },
+        { name: 'Mountain climbers', sets: sets(3), reps: '30-40s', note: 'core y acondicionamiento; mantén la cadera estable' },
       ],
     },
     {
       day: 'Viernes',
       title: 'Cardio + abdomen',
       exercises: [
-        { name: hasCardio ? 'Cardio HIIT' : 'Marcha vigorosa', sets: `${Math.max(1, Math.round(1 * multiplier))} series`, reps: '10-20 min', note: 'tono cardiovascular y trabajo aeróbico' },
-        { name: 'Plancha abdominal', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '30-45s', note: 'core rígido y tensión continua' },
-        { name: 'Abdominales crunch', sets: `${Math.max(3, Math.round(3 * multiplier))} series`, reps: '15-20', note: 'superior abdominal con control total' },
+        { name: hasCardio ? 'Cardio HIIT' : 'Marcha vigorosa', sets: sets(1), reps: hasCardio ? '10-20 min' : '15-25 min', note: 'acondicionamiento; ajusta el ritmo para mantener una técnica segura' },
+        { name: 'Plancha abdominal', sets: sets(3), reps: '30-45s', note: 'core anti-extensión; aprieta abdomen y glúteos sin hundir la cadera' },
+        { name: 'Abdominales crunch', sets: sets(3), reps: '12-20', note: 'flexión de tronco; sube con el abdomen, no con el cuello' },
+        { name: 'Puente de glúteos', sets: sets(3), reps: '12-15', note: 'estabilidad de cadera para cerrar la semana con control' },
       ],
     },
   ];
@@ -1654,6 +1660,9 @@ export default function App() {
         <AnimatedSection delay={0}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Equipo disponible</Text>
+          <Text style={styles.cardDescription}>
+            Rutina base inspirada en principios de ACSM: fuerza, volumen progresivo, equilibrio entre patrones y técnica segura. Ajusta las cargas a tu nivel y consulta a un profesional si tienes lesiones o condiciones médicas.
+          </Text>
           <View style={styles.chipWrap}>
             {equipmentList.map((item) => {
               const active = selectedEquipment.includes(item);
@@ -1913,7 +1922,7 @@ export default function App() {
                           style={styles.exerciseImage}
                           resizeMode="cover"
                         />
-                      ) : null}
+                      ) : <View style={styles.exerciseImagePlaceholder} />}
                       <Pressable
                         onPress={() => toggleExerciseDone(dayPlan.day, exercise.name, exerciseIndex)}
                         style={[styles.checkbox, currentProgress.done && styles.checkboxActive]}
@@ -2790,6 +2799,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#26352d',
     marginRight: 10,
+  },
+  exerciseImagePlaceholder: {
+    width: 140,
+    height: 100,
+    marginRight: 10,
+    backgroundColor: 'transparent',
   },
   checkbox: {
     width: 22,

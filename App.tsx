@@ -46,6 +46,7 @@ import {
   logoutUser,
   onAuthStateChange,
   registerUser,
+  resetUserPassword,
 } from './src/services/authService';
 import type { RoutineAssignment, RoutineTemplate, TrainerAssignment, UserProfile } from './src/types/user';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -102,6 +103,18 @@ const createBlankRoutine = (): RoutineDay[] =>
     title: 'Nuevo entrenamiento',
     exercises: [{ name: 'Nuevo ejercicio', sets: '3 series', reps: '8-10', note: 'Añade una nota' }],
   }));
+
+const createEmptyProfile = (): UserProfile => ({
+  id: 'local-user',
+  name: '',
+  email: '',
+  role: 'user',
+  level: 'Principiante',
+  goals: [],
+  equipment: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
 
 const getRoutine = (selectedEquipment: EquipmentName[], intensity: Intensity): RoutineDay[] => {
   const multiplier = intensityMultiplier[intensity];
@@ -358,18 +371,9 @@ export default function App() {
   const [routineTitle, setRoutineTitle] = useState('Rutina personalizada');
   const [routineAssignmentMessage, setRoutineAssignmentMessage] = useState('');
   const [selectedEditRoutineId, setSelectedEditRoutineId] = useState('default');
-  const [profile, setProfile] = useState<UserProfile>({
-    id: 'local-user',
-    name: '',
-    email: '',
-    role: 'user',
-    level: 'Principiante',
-    goals: [],
-    equipment: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
+  const [profile, setProfile] = useState<UserProfile>(() => createEmptyProfile());
   const [profileMessage, setProfileMessage] = useState('');
+  const [signOutConfirmVisible, setSignOutConfirmVisible] = useState(false);
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
     normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
@@ -382,6 +386,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
   const [authPromptVisible, setAuthPromptVisible] = useState(false);
   const [authPromptText, setAuthPromptText] = useState('');
@@ -523,7 +528,7 @@ export default function App() {
 
         setTrainerAssignments(savedAssignments);
         setRoutineAssignments(savedRoutineAssignments);
-        if (savedProfile) {
+        if (sessionUser && savedProfile) {
           setProfile(savedProfile);
         } else if (sessionUser) {
           setProfile((current) => ({
@@ -533,6 +538,8 @@ export default function App() {
             email: sessionUser.email ?? current.email,
             updatedAt: new Date().toISOString(),
           }));
+        } else {
+          setProfile(createEmptyProfile());
         }
         if (sharedRoutine) {
           if (sessionUser) {
@@ -1093,6 +1100,32 @@ export default function App() {
     }
   };
 
+  const submitPasswordReset = async () => {
+    const email = authEmail.trim();
+    if (!email) {
+      setAuthMessage('Escribe tu correo para recuperar la contraseña.');
+      return;
+    }
+
+    try {
+      setPasswordResetLoading(true);
+      setAuthMessage('');
+      await resetUserPassword(email);
+      setAuthMessage('Te enviamos un enlace para crear una nueva contraseña. Revisa tu correo y la carpeta de spam.');
+    } catch (error: any) {
+      const code = String(error?.code ?? '');
+      if (code.includes('auth/invalid-email')) {
+        setAuthMessage('El correo no es válido.');
+      } else if (code.includes('auth/user-not-found')) {
+        setAuthMessage('No encontramos una cuenta con ese correo.');
+      } else {
+        setAuthMessage('No se pudo enviar el enlace. Intenta de nuevo.');
+      }
+    } finally {
+      setPasswordResetLoading(false);
+    }
+  };
+
   const submitGoogleAuth = async () => {
     try {
       setAuthMessage('');
@@ -1122,10 +1155,18 @@ export default function App() {
   const signOutCurrentUser = async () => {
     try {
       await logoutUser();
+      setSignOutConfirmVisible(false);
+      setActiveScreen('today');
+      setProfile(createEmptyProfile());
+      setProfileMessage('');
       setProfileMessage('Sesión cerrada.');
     } catch {
       setProfileMessage('No se pudo cerrar sesión.');
     }
+  };
+
+  const confirmSignOut = () => {
+    setSignOutConfirmVisible(true);
   };
 
   if (!authReady) {
@@ -1358,25 +1399,27 @@ export default function App() {
                   );
                 })}
               </View>
-              <Pressable onPress={() => void saveProfile()} style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>Guardar perfil</Text>
-              </Pressable>
-              {sessionUser ? (
-                <Pressable onPress={() => void signOutCurrentUser()} style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>Cerrar sesión</Text>
+              <View style={styles.profileActions}>
+                <Pressable onPress={() => void saveProfile()} style={[styles.primaryButton, styles.profileActionButton]}>
+                  <Text style={styles.primaryButtonText}>Guardar perfil</Text>
                 </Pressable>
-              ) : (
-                <Pressable
-                  onPress={() => {
-                    setAuthMode('register');
-                    setAuthPromptText('Regístrate para guardar perfil y personalizar tu experiencia.');
-                    setAuthPromptVisible(true);
-                  }}
-                  style={styles.secondaryButton}
-                >
-                  <Text style={styles.secondaryButtonText}>Crear cuenta</Text>
-                </Pressable>
-              )}
+                {sessionUser ? (
+                  <Pressable onPress={confirmSignOut} style={[styles.secondaryButton, styles.profileActionButton, styles.signOutButton]}>
+                    <Text style={styles.secondaryButtonText}>Cerrar sesión</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={() => {
+                      setAuthMode('register');
+                      setAuthPromptText('Regístrate para guardar perfil y personalizar tu experiencia.');
+                      setAuthPromptVisible(true);
+                    }}
+                    style={[styles.secondaryButton, styles.profileActionButton]}
+                  >
+                    <Text style={styles.secondaryButtonText}>Crear cuenta</Text>
+                  </Pressable>
+                )}
+              </View>
               {profileMessage ? <Text style={styles.assignmentMessage}>{profileMessage}</Text> : null}
             </View>
           </View>
@@ -1976,6 +2019,14 @@ export default function App() {
                 style={styles.profileInput}
               />
 
+              {authMode === 'login' ? (
+                <Pressable onPress={() => void submitPasswordReset()} style={styles.passwordResetButton}>
+                  <Text style={styles.passwordResetText}>
+                    {passwordResetLoading ? 'Enviando enlace...' : '¿Olvidaste tu contraseña?'}
+                  </Text>
+                </Pressable>
+              ) : null}
+
               <View style={styles.summaryRow}>
                 <Pressable onPress={() => void submitAuth()} style={styles.primaryButton}>
                   <Text style={styles.primaryButtonText}>
@@ -2005,6 +2056,23 @@ export default function App() {
 
               {authMessage ? <Text style={styles.assignmentMessage}>{authMessage}</Text> : null}
             </Animated.View>
+          </View>
+        ) : null}
+        {signOutConfirmVisible ? (
+          <View style={styles.confirmationOverlay}>
+            <View style={styles.confirmationCard}>
+              <Text style={styles.eyebrow}>CUENTA</Text>
+              <Text style={styles.sectionTitle}>¿Cerrar sesión?</Text>
+              <Text style={styles.cardDescription}>Tu sesión se cerrará en este dispositivo.</Text>
+              <View style={styles.profileActions}>
+                <Pressable onPress={() => setSignOutConfirmVisible(false)} style={[styles.secondaryButton, styles.profileActionButton]}>
+                  <Text style={styles.secondaryButtonText}>Cancelar</Text>
+                </Pressable>
+                <Pressable onPress={() => void signOutCurrentUser()} style={[styles.secondaryButton, styles.profileActionButton, styles.signOutButton]}>
+                  <Text style={styles.secondaryButtonText}>Cerrar sesión</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
         ) : null}
         </Animated.View>
@@ -2048,6 +2116,16 @@ const styles = StyleSheet.create({
   authSwitchText: {
     color: '#7ed8ff',
     fontSize: 13,
+    fontWeight: '700',
+  },
+  passwordResetButton: {
+    alignSelf: 'flex-start',
+    marginTop: -2,
+    marginBottom: 10,
+  },
+  passwordResetText: {
+    color: '#9edff7',
+    fontSize: 12,
     fontWeight: '700',
   },
   appShell: {
@@ -2308,6 +2386,43 @@ const styles = StyleSheet.create({
   },
   profileHeroCopy: {
     flex: 1,
+  },
+  profileActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4,
+  },
+  profileActionButton: {
+    minWidth: 148,
+    alignItems: 'center',
+  },
+  signOutButton: {
+    backgroundColor: '#3a2630',
+    borderWidth: 1,
+    borderColor: '#a9435b',
+  },
+  confirmationOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(4, 12, 17, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 500,
+    elevation: 50,
+    padding: 20,
+  },
+  confirmationCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#10232c',
+    borderWidth: 1,
+    borderColor: '#a9435b',
+    borderRadius: 14,
+    padding: 20,
   },
   profileHeroTitle: {
     color: '#f5fbff',

@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   signInWithCredential,
   signInWithPopup,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   User,
@@ -61,6 +62,10 @@ export const loginUser = async (email: string, password: string): Promise<User> 
     console.error('Login error:', error.message);
     throw error;
   }
+};
+
+export const resetUserPassword = async (email: string): Promise<void> => {
+  await sendPasswordResetEmail(auth, email);
 };
 
 export const loginWithGoogleWeb = async (): Promise<User> => {

@@ -74,6 +74,19 @@ FitFlow tendrá tres tipos de usuario:
 - **Entrenador:** revisa clientes y asigna rutinas desde la web.
 - **Administrador:** gestiona usuarios y contenido del sistema.
 
+Matriz inicial de permisos:
+
+| Acción | Usuario | Entrenador | Administrador |
+| --- | --- | --- | --- |
+| Gestionar su propio perfil | Crear y editar | Crear y editar | Crear y editar |
+| Crear y editar sus rutinas | Sí | Sí | Sí |
+| Registrar sus entrenamientos y progreso | Sí | No | No |
+| Consultar el progreso de sus clientes | No | Sí, solo clientes asignados | Sí |
+| Asignar rutinas a clientes | No | Sí, solo clientes asignados | Sí |
+| Gestionar usuarios y contenido global | No | No | Sí |
+
+Las reglas de Firestore deben validar el `userId` del documento y el rol almacenado en el perfil. El rol no podrá ser cambiado por el propio usuario desde la aplicación.
+
 Resultado: una lista clara de permisos antes de escribir las reglas de Firestore.
 
 ### 2. Definir las pantallas
@@ -87,6 +100,20 @@ El flujo inicial será:
 5. Progreso para consultar historial y estadísticas.
 6. Perfil para editar objetivos, nivel y equipo.
 7. Panel de entrenador en la versión web.
+
+Navegación inicial:
+
+| Origen | Destino | Condición |
+| --- | --- | --- |
+| Sesión no iniciada | Inicio de sesión o registro | El usuario puede consultar contenido público, pero debe autenticarse para guardar cambios |
+| Inicio | Rutinas | Siempre disponible para usuarios autenticados |
+| Inicio | Entrenamiento | Existe una rutina activa |
+| Inicio | Progreso | Existe historial de entrenamientos |
+| Inicio | Perfil | Siempre disponible para usuarios autenticados |
+| Usuario entrenador | Panel de entrenador | El perfil tiene rol `trainer` |
+| Usuario administrador | Administración | El perfil tiene rol `admin` |
+
+En móvil se usará una navegación inferior para Inicio, Rutinas, Entrenamiento, Progreso y Perfil. En web, el panel de entrenador y las vistas administrativas se mostrarán desde una barra lateral responsive.
 
 Resultado: cada pantalla tendrá una responsabilidad concreta y no se mezclará autenticación con lógica de entrenamiento.
 
@@ -117,7 +144,25 @@ users/{userId}/progress/{progressId}
 trainerAssignments/{assignmentId}
 ```
 
-Cada documento debe incluir `userId` y fechas `createdAt` y `updatedAt` cuando corresponda. Esto permitirá proteger los datos por usuario y consultar el historial sin depender de datos globales.
+Modelo inicial de documentos:
+
+| Colección | Campos principales | Propietario o acceso |
+| --- | --- | --- |
+| `users/{userId}` | `displayName`, `email`, `role`, `goal`, `level`, `availability`, `equipment`, `createdAt`, `updatedAt` | El usuario administra su perfil; entrenador y administrador consultan según permisos |
+| `users/{userId}/routines/{routineId}` | `name`, `source`, `equipment`, `intensity`, `days`, `exercises`, `createdAt`, `updatedAt` | El usuario administra sus rutinas; el entrenador puede administrar copias asignadas |
+| `users/{userId}/workouts/{workoutId}` | `routineId`, `date`, `duration`, `completed`, `notes`, `createdAt`, `updatedAt` | Solo el usuario escribe; entrenador y administrador pueden consultar cuando corresponda |
+| `users/{userId}/progress/{progressId}` | `workoutId`, `exerciseId`, `sets`, `repetitions`, `weight`, `notes`, `recordedAt` | Solo el usuario escribe su progreso |
+| `trainerAssignments/{assignmentId}` | `trainerId`, `clientId`, `routineId`, `status`, `createdAt`, `updatedAt` | Entrenador asignado y administrador |
+
+Reglas del modelo:
+
+- Cada documento debe incluir `createdAt` y `updatedAt` cuando sea editable.
+- Los subdocumentos de `users/{userId}` deben usar el mismo `userId` del propietario.
+- `trainerAssignments` relaciona únicamente a un entrenador con un cliente y una rutina.
+- Las fechas se guardarán como `Timestamp` de Firestore.
+- Las rutinas conservarán los ejercicios como datos serializables, incluyendo `exerciseId`, `sets`, `repetitions`, `rest` y `notes`.
+
+Esto permitirá proteger los datos por usuario y consultar el historial sin depender de datos globales.
 
 ### 5. Sistema visual mínimo
 
@@ -126,11 +171,11 @@ Antes de construir muchas pantallas se definirán colores, tipografía, espaciad
 ### Checklist de cierre de la semana 1
 
 - [x] El proyecto se identifica como FitFlow.
-- [ ] Usuarios y permisos documentados.
-- [ ] Navegación inicial documentada.
+- [x] Usuarios y permisos documentados.
+- [x] Navegación inicial documentada.
 - [x] Tipos y constantes separados de `App.tsx`.
 - [x] Persistencia aislada detrás de un servicio.
-- [ ] Modelo inicial de Firestore documentado.
+- [x] Modelo inicial de Firestore documentado.
 - [ ] `npx.cmd tsc --noEmit` sin errores.
 
 Archivos creados en esta etapa:

@@ -474,6 +474,38 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let isCurrentSession = true;
+
+    if (!sessionUser) {
+      setProfile(createEmptyProfile());
+      return () => {
+        isCurrentSession = false;
+      };
+    }
+
+    setProfile((current) => ({
+      ...current,
+      id: sessionUser.uid,
+      name: sessionUser.displayName ?? '',
+      email: sessionUser.email ?? '',
+      updatedAt: new Date().toISOString(),
+    }));
+
+    const loadProfile = async () => {
+      const savedProfile = await loadUserProfile();
+      if (isCurrentSession && savedProfile) {
+        setProfile(savedProfile);
+      }
+    };
+
+    void loadProfile();
+
+    return () => {
+      isCurrentSession = false;
+    };
+  }, [sessionUser]);
+
+  useEffect(() => {
     const resolveGoogleAuth = async () => {
       if (!googleResponse || Platform.OS === 'web') return;
 

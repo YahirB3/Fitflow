@@ -48,39 +48,13 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:tu_app_id
 
 ## Paso 6: Configurar Reglas de Seguridad (Importante)
 
-En **Firestore Database**, ve a la pestaña **Rules** y reemplaza con esto:
+En **Firestore Database**, ve a la pestaña **Rules** y publica el contenido de [`firestore.rules`](firestore.rules). Estas reglas:
 
-```javascript
-rules_version = '3';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Los usuarios solo pueden acceder a su propio documento
-    match /users/{userId} {
-      allow read, write: if request.auth.uid == userId;
-    }
-    
-    // Trainer assignments: el cliente puede leer sus asignaciones
-    match /trainerAssignments/{document=**} {
-      allow read: if request.auth.uid == resource.data.clientId 
-                  || request.auth.uid == resource.data.trainerId;
-      allow write: if request.auth.uid == resource.data.trainerId;
-    }
-    
-    // Routine assignments: similar a trainer assignments
-    match /routineAssignments/{document=**} {
-      allow read: if request.auth.uid == resource.data.clientId 
-                  || request.auth.uid == resource.data.trainerId;
-      allow write: if request.auth.uid == resource.data.trainerId;
-    }
-    
-    // Templates: el dueño puede hacer todo, otros solo leer
-    match /routineTemplates/{document=**} {
-      allow read: if true; // Todos pueden ver (públicos)
-      allow write: if request.auth.uid == resource.data.ownerId;
-    }
-  }
-}
-```
+- Los usuarios solo leen y editan su propio perfil.
+- El rol de un usuario no puede cambiarse desde la aplicación.
+- Clientes y entrenadores solo acceden a sus asignaciones.
+- Cada propietario administra sus plantillas.
+- Los administradores tienen acceso de gestión.
 
 **Haz clic en "Publicar"**
 
@@ -103,8 +77,9 @@ npm start
 ## Próximos Pasos
 
 Ahora que Firebase está configurado, el App.tsx:
-- Usará `firebaseService.ts` en lugar de AsyncStorage
-- Los datos se sincronizarán automáticamente con la nube
+- Sincroniza el perfil autenticado mediante `firebaseService.ts`.
+- Mantiene `AsyncStorage` como respaldo local y para el modo invitado.
+- Ampliará la sincronización de rutinas, progreso y sesiones en los siguientes pasos.
 - Los usuarios pueden autenticarse con email/password
 - Los datos son persistentes entre dispositivos
 

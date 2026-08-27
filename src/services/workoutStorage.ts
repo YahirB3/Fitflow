@@ -9,6 +9,15 @@ import type {
   TrainerAssignment,
   UserProfile,
 } from '../types/user';
+import { auth } from '../config/firebase.config';
+import {
+  loadUserProfile as loadFirestoreUserProfile,
+  saveUserProfile as saveFirestoreUserProfile,
+  loadUserRoutine,
+  saveUserRoutine,
+  loadUserProgress,
+  saveUserProgress,
+} from './firebaseService';
 
 type ProgressState = {
   weekKey: string;
@@ -26,6 +35,11 @@ const STORAGE_KEYS = {
 } as const;
 
 export const loadUserProfile = async (): Promise<UserProfile | null> => {
+  if (auth.currentUser) {
+    const firestoreProfile = await loadFirestoreUserProfile(auth.currentUser.uid);
+    return firestoreProfile;
+  }
+
   const saved = await AsyncStorage.getItem(STORAGE_KEYS.profile);
   if (!saved) return null;
   return JSON.parse(saved) as UserProfile;
@@ -33,9 +47,17 @@ export const loadUserProfile = async (): Promise<UserProfile | null> => {
 
 export const saveUserProfile = async (profile: UserProfile) => {
   await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
+  if (auth.currentUser?.uid === profile.id) {
+    await saveFirestoreUserProfile(profile);
+  }
 };
 
 export const loadProgressState = async (): Promise<ProgressState | null> => {
+  if (auth.currentUser) {
+    const firestoreProgress = await loadUserProgress(auth.currentUser.uid);
+    if (firestoreProgress) return firestoreProgress;
+  }
+
   const saved = await AsyncStorage.getItem(STORAGE_KEYS.progress);
   if (!saved) return null;
 
@@ -48,6 +70,9 @@ export const loadProgressState = async (): Promise<ProgressState | null> => {
 
 export const saveProgressState = async (state: ProgressState) => {
   await AsyncStorage.setItem(STORAGE_KEYS.progress, JSON.stringify(state));
+  if (auth.currentUser) {
+    await saveUserProgress(state);
+  }
 };
 
 export const loadHistory = async (): Promise<WeeklySummary[]> => {
@@ -61,6 +86,11 @@ export const saveHistory = async (history: WeeklySummary[]) => {
 };
 
 export const loadCustomRoutine = async (): Promise<RoutineDay[] | null> => {
+  if (auth.currentUser) {
+    const firestoreRoutine = await loadUserRoutine(auth.currentUser.uid);
+    if (firestoreRoutine) return firestoreRoutine;
+  }
+
   const saved = await AsyncStorage.getItem(STORAGE_KEYS.routine);
   if (!saved) return null;
   return JSON.parse(saved) as RoutineDay[];
@@ -68,6 +98,9 @@ export const loadCustomRoutine = async (): Promise<RoutineDay[] | null> => {
 
 export const saveCustomRoutine = async (routine: RoutineDay[]) => {
   await AsyncStorage.setItem(STORAGE_KEYS.routine, JSON.stringify(routine));
+  if (auth.currentUser) {
+    await saveUserRoutine(routine);
+  }
 };
 
 export const removeCustomRoutine = async () => {

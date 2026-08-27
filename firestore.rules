@@ -1,0 +1,79 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isTrainer() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'trainer';
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if signedIn()
+        && (isAdmin() || (request.auth.uid == userId
+          && request.resource.data.role == resource.data.role));
+      allow delete: if isAdmin();
+
+      match /routines/{routineId} {
+        allow read, write: if signedIn() && (request.auth.uid == userId || isAdmin());
+      }
+
+      match /workouts/{workoutId} {
+        allow read, write: if signedIn() && (request.auth.uid == userId || isAdmin());
+      }
+
+      match /progress/{progressId} {
+        allow read, write: if signedIn() && (request.auth.uid == userId || isAdmin());
+      }
+    }
+
+    match /trainerAssignments/{assignmentId} {
+      allow read: if signedIn()
+        && (request.auth.uid == resource.data.clientId
+          || request.auth.uid == resource.data.trainerId
+          || isAdmin());
+      allow create: if signedIn()
+        && (request.auth.uid == request.resource.data.clientId || isAdmin());
+      allow update: if signedIn()
+        && (request.auth.uid == resource.data.trainerId
+          || request.auth.uid == resource.data.clientId
+          || isAdmin());
+      allow delete: if signedIn()
+        && (request.auth.uid == resource.data.clientId
+          || request.auth.uid == resource.data.trainerId
+          || isAdmin());
+    }
+
+    match /routineAssignments/{assignmentId} {
+      allow read: if signedIn()
+        && (request.auth.uid == resource.data.clientId
+          || request.auth.uid == resource.data.trainerId
+          || isAdmin());
+      allow create, update: if signedIn()
+        && (request.auth.uid == request.resource.data.trainerId || isAdmin());
+      allow delete: if signedIn()
+        && (request.auth.uid == resource.data.trainerId
+          || request.auth.uid == resource.data.clientId
+          || isAdmin());
+    }
+
+    match /routineTemplates/{templateId} {
+      allow read: if signedIn()
+        && (request.auth.uid == resource.data.ownerId || isTrainer() || isAdmin());
+      allow create: if signedIn()
+        && (request.auth.uid == request.resource.data.ownerId || isAdmin());
+      allow update, delete: if signedIn()
+        && (request.auth.uid == resource.data.ownerId || isAdmin());
+    }
+  }
+}

@@ -13,7 +13,7 @@ import {
   browserLocalPersistence,
 } from 'firebase/auth';
 import { auth, db } from '../config/firebase.config';
-import { saveUserProfile } from './firebaseService';
+import { ensureUserProfile, saveUserProfile } from './firebaseService';
 import { UserProfile } from '../types/user';
 
 export const registerUser = async (
@@ -57,6 +57,7 @@ export const loginUser = async (email: string, password: string): Promise<User> 
     });
 
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    await ensureUserProfile(userCredential.user);
     return userCredential.user;
   } catch (error: any) {
     console.error('Login error:', error.message);
@@ -71,12 +72,14 @@ export const resetUserPassword = async (email: string): Promise<void> => {
 export const loginWithGoogleWeb = async (): Promise<User> => {
   const provider = new GoogleAuthProvider();
   const userCredential = await signInWithPopup(auth, provider);
+  await ensureUserProfile(userCredential.user);
   return userCredential.user;
 };
 
 export const loginWithGoogleIdToken = async (idToken: string): Promise<User> => {
   const credential = GoogleAuthProvider.credential(idToken);
   const userCredential = await signInWithCredential(auth, credential);
+  await ensureUserProfile(userCredential.user);
   return userCredential.user;
 };
 

@@ -62,6 +62,85 @@ export const saveUserProfile = async (profile: UserProfile): Promise<void> => {
   }
 };
 
+export const ensureUserProfile = async (user: {
+  uid: string;
+  displayName: string | null;
+  email: string | null;
+}): Promise<UserProfile> => {
+  const existingProfile = await loadUserProfile(user.uid);
+  if (existingProfile) return existingProfile;
+
+  const now = new Date().toISOString();
+  const profile: UserProfile = {
+    id: user.uid,
+    name: user.displayName ?? '',
+    email: user.email ?? '',
+    role: 'user',
+    level: 'Principiante',
+    goals: [],
+    equipment: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await saveUserProfile(profile);
+  return profile;
+};
+
+export const loadUserRoutine = async (userId?: string): Promise<RoutineDay[] | null> => {
+  try {
+    const uid = userId || auth.currentUser?.uid;
+    if (!uid) return null;
+
+    const routineSnap = await getDoc(doc(db, COLLECTIONS.users, uid, 'routines', 'active'));
+    return routineSnap.exists() ? (routineSnap.data().routine as RoutineDay[]) : null;
+  } catch (error) {
+    console.error('Error loading user routine:', error);
+    return null;
+  }
+};
+
+export const saveUserRoutine = async (routine: RoutineDay[]): Promise<void> => {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+
+  await setDoc(doc(db, COLLECTIONS.users, uid, 'routines', 'active'), {
+    routine,
+    updatedAt: Timestamp.now().toDate().toISOString(),
+  }, { merge: true });
+};
+
+export const loadUserProgress = async (userId?: string): Promise<{
+  weekKey: string;
+  progress: Record<string, { done: boolean; weights: string[] }>;
+} | null> => {
+  try {
+    const uid = userId || auth.currentUser?.uid;
+    if (!uid) return null;
+
+    const progressSnap = await getDoc(doc(db, COLLECTIONS.users, uid, 'progress', 'current'));
+    return progressSnap.exists()
+      ? progressSnap.data() as { weekKey: string; progress: Record<string, { done: boolean; weights: string[] }> }
+      : null;
+  } catch (error) {
+    console.error('Error loading user progress:', error);
+    return null;
+  }
+};
+
+export const saveUserProgress = async (state: {
+  weekKey: string;
+  progress: Record<string, { done: boolean; weights: string[] }>;
+}): Promise<void> => {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+
+  await setDoc(doc(db, COLLECTIONS.users, uid, 'progress', 'current'), {
+    ...state,
+    updatedAt: Timestamp.now().toDate().toISOString(),
+  }, { merge: true });
+};
+
 // ============ TRAINER ASSIGNMENTS ============
 export const loadTrainerAssignments = async (userId?: string): Promise<TrainerAssignment[]> => {
   try {

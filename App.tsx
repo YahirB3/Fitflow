@@ -112,71 +112,132 @@ const createEmptyProfile = (): UserProfile => ({
   level: 'Principiante',
   goals: [],
   equipment: [],
+  dailyMinutes: 45,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
 
-const getRoutine = (selectedEquipment: EquipmentName[], intensity: Intensity): RoutineDay[] => {
+const normalizeGoal = (goalValue?: string): 'fuerza' | 'masa' | 'resistencia' | 'tonificacion' => {
+  const value = String(goalValue ?? '').trim().toLowerCase();
+  if (!value) return 'fuerza';
+  if (value.includes('masa') || value.includes('hipertrofia')) return 'masa';
+  if (value.includes('resist') || value.includes('cardio') || value.includes('condicion')) return 'resistencia';
+  if (value.includes('ton') || value.includes('defin') || value.includes('estilo')) return 'tonificacion';
+  return 'fuerza';
+};
+
+const getRecommendedIntensity = (level?: UserProfile['level']): Intensity => {
+  if (level === 'Avanzado') return 'Alta';
+  if (level === 'Intermedio') return 'Media';
+  return 'Baja';
+};
+
+const getRoutine = (
+  selectedEquipment: EquipmentName[],
+  intensity: Intensity,
+  userGoal?: string,
+  dailyMinutes = 45,
+): RoutineDay[] => {
   const multiplier = intensityMultiplier[intensity];
+  const goal = normalizeGoal(userGoal);
   const hasBarra = selectedEquipment.includes('Barra Olímpica');
   const hasMancuernas = selectedEquipment.includes('Mancuernas');
   const hasCardio = selectedEquipment.includes('Caminadora');
-  const sets = (base: number) => `${Math.max(2, Math.round(base * multiplier))} series`;
+  const hasBanco = selectedEquipment.includes('Banco');
+  const hasBandas = selectedEquipment.includes('Bandas');
+  const durationFactor = dailyMinutes <= 30 ? 0.8 : dailyMinutes <= 45 ? 1 : dailyMinutes <= 60 ? 1.18 : 1.35;
+  const sets = (base: number) => `${Math.max(2, Math.round(base * multiplier * durationFactor))} series`;
 
-  const basePlan: RoutineDay[] = [
+  if (dailyMinutes <= 30) {
+    return ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'].map((day) => ({
+      day,
+      title: 'Tiempo insuficiente para el plan semanal',
+      exercises: [{
+        name: 'Movilidad y caminata ligera',
+        sets: '1 serie',
+        reps: '10-15 min',
+        note: 'Indica más de 30 minutos diarios para recibir una rutina semanal personalizada.',
+      }],
+    }));
+  }
+
+  const goalTitles: Record<typeof goal, { push: string; lower: string; cardio: string; core: string }> = {
+    fuerza: {
+      push: 'Empuje + fuerza',
+      lower: 'Piernas + potencia',
+      cardio: 'Tracción + hombros',
+      core: 'Fuerza + abdomen',
+    },
+    masa: {
+      push: 'Volumen + pecho',
+      lower: 'Piernas + hipertrofia',
+      cardio: 'Espalda + hombros',
+      core: 'Masa + resistencia',
+    },
+    resistencia: {
+      push: 'Resistencia + fuerza',
+      lower: 'Piernas + cardio',
+      cardio: 'Tracción + acondicionamiento',
+      core: 'Core + energía',
+    },
+    tonificacion: {
+      push: 'Tonificación + empuje',
+      lower: 'Piernas + definicion',
+      cardio: 'Espalda + postura',
+      core: 'Core + control',
+    },
+  };
+
+  const plan = [
     {
       day: 'Lunes',
-      title: 'Pecho + tríceps',
+      title: goalTitles[goal].push,
       exercises: [
-        { name: hasBarra ? 'Press de banca' : 'Press con mancuernas', sets: sets(4), reps: '6-10', note: 'empuje horizontal; baja con control y mantén los hombros estables' },
-        { name: hasMancuernas ? 'Press inclinado con mancuernas' : 'Press inclinado', sets: sets(3), reps: '8-12', note: 'pecho superior; evita despegar los hombros del banco' },
-        { name: hasMancuernas ? 'Fly de pecho' : 'Flexiones', sets: sets(3), reps: '10-15', note: 'acerca las manos con control sin perder la alineación del tronco' },
-        { name: 'Dips o extensión de tríceps', sets: sets(3), reps: '8-12', note: 'extensión de codo con movimiento estable y sin balanceo' },
+        { name: hasBarra ? 'Press de banca' : hasMancuernas ? 'Press inclinado con mancuernas' : 'Press con mancuernas', sets: sets(goal === 'resistencia' ? 3 : 4), reps: goal === 'resistencia' ? '8-12' : '6-10', note: goal === 'fuerza' ? 'empuje horizontal con control total y hombros estables' : goal === 'masa' ? 'volumen progresivo para ganar fuerza útil y tono' : goal === 'tonificacion' ? 'movimiento limpio y control muscular' : 'baja con control y mantiene la técnica' },
+        { name: hasMancuernas ? 'Fly de pecho' : hasBanco ? 'Dip en banco' : 'Flexiones', sets: sets(3), reps: goal === 'resistencia' ? '10-15' : '8-12', note: 'acción de pecho con control y sinBalance arrastrado' },
+        { name: hasCardio ? 'Intervalos en caminadora' : 'Mountain climbers', sets: sets(goal === 'resistencia' ? 4 : 3), reps: hasCardio ? '30s/30s' : '20-30s', note: 'aceleración moderada para sostener la intensidad del día' },
       ],
     },
     {
       day: 'Martes',
-      title: 'Piernas + fuerza',
+      title: goalTitles[goal].lower,
       exercises: [
-        { name: hasBarra ? 'Sentadilla con barra' : 'Sentadilla goblet', sets: sets(4), reps: '6-10', note: 'dominante de rodilla; desciende con control y mantén la espalda neutra' },
-        { name: hasBarra ? 'Peso muerto' : 'Peso muerto con mancuernas', sets: sets(3), reps: '6-8', note: 'bisagra de cadera; activa glúteos sin redondear la espalda' },
-        { name: hasMancuernas ? 'Zancadas con mancuernas' : 'Step-ups', sets: sets(3), reps: '8-12 por pierna', note: 'trabajo unilateral; controla la rodilla y el equilibrio' },
-        { name: 'Puente de glúteos', sets: sets(3), reps: '12-15', note: 'extensión de cadera; pausa arriba sin arquear la zona lumbar' },
+        { name: hasBarra ? 'Sentadilla con barra' : hasMancuernas ? 'Zancadas con mancuernas' : 'Sentadilla goblet', sets: sets(4), reps: goal === 'resistencia' ? '8-12' : '6-10', note: 'profundidad controlada y pie estable para generar fuerza en piernas' },
+        { name: hasBarra ? 'Peso muerto' : hasMancuernas ? 'Peso muerto con mancuernas' : 'Step-up', sets: sets(3), reps: goal === 'resistencia' ? '8-12' : '6-8', note: 'bisagra de cadera con torso alineado y glúteos activos' },
+        { name: hasMancuernas ? 'Puente de glúteos' : 'Step-up', sets: sets(3), reps: '12-15', note: 'actividad de cadera para estabilidad y fuerza general' },
       ],
     },
     {
       day: 'Miércoles',
-      title: 'Espalda + hombros',
+      title: goalTitles[goal].cardio,
       exercises: [
-        { name: hasBarra ? 'Dominadas o jalar barra' : 'Remo con banda', sets: sets(4), reps: '6-10', note: 'tracción vertical u horizontal; lleva los codos hacia atrás sin encoger hombros' },
-        { name: hasMancuernas ? 'Remo apoyado' : 'Remo con banda', sets: sets(3), reps: '8-12', note: 'espalda media; mantén el tronco estable durante todo el recorrido' },
-        { name: hasBarra ? 'Peso muerto rumano' : 'Peso muerto rumano con mancuernas', sets: sets(3), reps: '8-12', note: 'cadena posterior; siente tensión en isquios sin forzar el rango' },
-        { name: hasMancuernas ? 'Press militar con mancuernas' : 'Press de hombro', sets: sets(3), reps: '8-12', note: 'empuje vertical; costillas abajo y muñecas alineadas' },
+        { name: hasBarra ? 'Dominadas' : hasBandas ? 'Remo con banda' : 'Remo apoyado', sets: sets(4), reps: goal === 'resistencia' ? '8-12' : '6-10', note: 'tracción con espalda y hombros acoplados para mantener postura' },
+        { name: hasMancuernas ? 'Press militar con mancuernas' : hasBandas ? 'Press de hombro con banda' : 'Press de hombro', sets: sets(3), reps: '8-12', note: 'carga estable y hombros alineados con la caja torácica' },
+        { name: hasCardio ? 'Caminata inclinada' : 'Band pull apart', sets: sets(goal === 'resistencia' ? 4 : 3), reps: hasCardio ? '15-20 min' : '12-15', note: 'mantén la intensidad constante sin perder técnica ni respiración' },
       ],
     },
     {
       day: 'Jueves',
-      title: 'Accesorios + resistencia',
+      title: goal === 'resistencia' ? 'Cardio + leg day' : 'Accesorios + volumen',
       exercises: [
-        { name: hasMancuernas ? 'Curl biceps alterno' : 'Curl con banda', sets: sets(3), reps: '10-15', note: 'flexión de codo; evita impulso y controla la bajada' },
-        { name: hasMancuernas ? 'Elevaciones laterales' : 'Band pull apart', sets: sets(3), reps: '12-15', note: 'hombro y postura; eleva hasta una posición cómoda' },
-        { name: hasCardio ? 'Intervalos en caminadora' : 'Burpees', sets: sets(4), reps: hasCardio ? '30s/30s' : '8-12', note: 'intervalos moderados; recupera lo suficiente para mantener técnica' },
-        { name: 'Mountain climbers', sets: sets(3), reps: '30-40s', note: 'core y acondicionamiento; mantén la cadera estable' },
+        { name: hasMancuernas ? 'Curl biceps alterno' : 'Curl con banda', sets: sets(3), reps: goal === 'masa' ? '8-12' : '10-15', note: 'flexión de codo con control total y tiempo bajo tensión' },
+        { name: hasMancuernas ? 'Elevaciones laterales' : 'Band pull apart', sets: sets(3), reps: '12-15', note: 'ejercicio de hombro y postura para un movimiento más estable' },
+        { name: hasCardio ? 'Cardio HIIT' : 'Burpees', sets: sets(goal === 'resistencia' ? 5 : 3), reps: hasCardio ? '30s/30s' : '8-12', note: 'tono y energía para cerrar con una sesión más exigente' },
       ],
     },
     {
       day: 'Viernes',
-      title: 'Cardio + abdomen',
+      title: goalTitles[goal].core,
       exercises: [
-        { name: hasCardio ? 'Cardio HIIT' : 'Marcha vigorosa', sets: sets(1), reps: hasCardio ? '10-20 min' : '15-25 min', note: 'acondicionamiento; ajusta el ritmo para mantener una técnica segura' },
-        { name: 'Plancha abdominal', sets: sets(3), reps: '30-45s', note: 'core anti-extensión; aprieta abdomen y glúteos sin hundir la cadera' },
-        { name: 'Abdominales crunch', sets: sets(3), reps: '12-20', note: 'flexión de tronco; sube con el abdomen, no con el cuello' },
-        { name: 'Puente de glúteos', sets: sets(3), reps: '12-15', note: 'estabilidad de cadera para cerrar la semana con control' },
+        { name: hasCardio ? 'Cardio HIIT' : 'Marcha vigorosa', sets: sets(goal === 'resistencia' ? 2 : 1), reps: hasCardio ? '10-15 min' : '15-20 min', note: 'concluye con un trabajo cardiovascular y energía sostenida' },
+        { name: 'Plancha abdominal', sets: sets(3), reps: '30-45s', note: 'core activado, cadera alineada y tensión constante' },
+        { name: 'Abdominales crunch', sets: sets(3), reps: '12-20', note: 'tracción abdominal sin forzar cuello ni espalda' },
+        { name: 'Puente de glúteos', sets: sets(3), reps: '12-15', note: 'ayuda a cerrar la semana con glúteos y columna más estables' },
       ],
     },
   ];
 
-  return basePlan.map((dayPlan) => ({
+  return plan.map((dayPlan) => ({
     ...dayPlan,
     exercises: dayPlan.exercises.map((exercise) => ({
       ...exercise,
@@ -364,7 +425,10 @@ export default function App() {
   const currentWeekKey = getWeekKey(new Date());
   const [activeScreen, setActiveScreen] = useState<AppScreen>('today');
   const [selectedEquipment, setSelectedEquipment] = useState<EquipmentName[]>(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas']);
-  const [intensity, setIntensity] = useState<Intensity>('Media');
+  const [intensity, setIntensity] = useState<Intensity>('Baja');
+  const [draftEquipment, setDraftEquipment] = useState<EquipmentName[]>(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas']);
+  const [draftIntensity, setDraftIntensity] = useState<Intensity>('Media');
+  const [dailyMinutes, setDailyMinutes] = useState<number>(45);
   const [weekProgress, setWeekProgress] = useState<Record<string, ExerciseProgress>>({});
   const [history, setHistory] = useState<WeeklySummary[]>([]);
   const [savedWeekKey, setSavedWeekKey] = useState<string>(currentWeekKey);
@@ -382,7 +446,7 @@ export default function App() {
   const [signOutConfirmVisible, setSignOutConfirmVisible] = useState(false);
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
-    normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Media')),
+    normalizeRoutine(null, getRoutine(['Barra Olímpica', 'Mancuernas', 'Caminadora', 'Banco', 'Bandas', 'Suelo / Colchonetas'], 'Baja')),
   );
   const [sessionUser, setSessionUser] = useState<FirebaseUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -411,9 +475,17 @@ export default function App() {
     webClientId: googleWebClientId || 'missing-web-client-id.apps.googleusercontent.com',
   });
 
+  const defaultRoutine = useMemo(
+    () => getRoutine(selectedEquipment, intensity, profile.goals?.[0], dailyMinutes),
+    [selectedEquipment, intensity, profile.goals, dailyMinutes],
+  );
+  const draftRoutine = useMemo(
+    () => getRoutine(draftEquipment, draftIntensity, profile.goals?.[0], dailyMinutes),
+    [draftEquipment, draftIntensity, profile.goals, dailyMinutes],
+  );
   const routine = useMemo(
-    () => normalizeRoutine(customRoutine, getRoutine(selectedEquipment, intensity)),
-    [customRoutine, selectedEquipment, intensity],
+    () => normalizeRoutine(customRoutine, defaultRoutine),
+    [customRoutine, defaultRoutine],
   );
   const totalExercises = routine.reduce((count, day) => count + day.exercises.length, 0);
   const completedExercises = countCompletedExercises(weekProgress);
@@ -495,6 +567,13 @@ export default function App() {
       const savedProfile = await loadUserProfile();
       if (isCurrentSession && savedProfile) {
         setProfile(savedProfile);
+        if (typeof savedProfile.dailyMinutes === 'number') {
+          setDailyMinutes(savedProfile.dailyMinutes);
+        }
+        if (Array.isArray(savedProfile.equipment)) {
+          setSelectedEquipment(savedProfile.equipment.filter((item): item is EquipmentName => equipmentList.includes(item as EquipmentName)));
+        }
+        setIntensity(getRecommendedIntensity(savedProfile.level));
       }
     };
 
@@ -674,6 +753,12 @@ export default function App() {
   }, [savedWeekKey, weekProgress]);
 
   useEffect(() => {
+    if (!customRoutine) {
+      setWeekProgress((current) => mergeProgressWithRoutine(current, defaultRoutine));
+    }
+  }, [customRoutine, defaultRoutine]);
+
+  useEffect(() => {
     const saveHistory = async () => {
       try {
         await saveHistoryToStorage(history);
@@ -690,6 +775,13 @@ export default function App() {
   const toggleEquipment = (item: EquipmentName) => {
     if (!requireAuthForAction('modificar tu equipo')) return;
     setSelectedEquipment((current) =>
+      current.includes(item) ? current.filter((value) => value !== item) : [...current, item],
+    );
+  };
+
+  const toggleDraftEquipment = (item: EquipmentName) => {
+    if (!requireAuthForAction('modificar el equipo de esta rutina')) return;
+    setDraftEquipment((current) =>
       current.includes(item) ? current.filter((value) => value !== item) : [...current, item],
     );
   };
@@ -771,7 +863,7 @@ export default function App() {
 
   const openWeekEditor = () => {
     if (!requireAuthForAction('editar la rutina')) return;
-    const safeRoutine = normalizeRoutine(routine, getRoutine(selectedEquipment, intensity));
+    const safeRoutine = normalizeRoutine(customRoutine ?? draftRoutine, defaultRoutine);
     setEditorRoutine(
       safeRoutine.map((day) => ({
         ...day,
@@ -887,7 +979,7 @@ export default function App() {
   
   const resetRoutineToDefault = async () => {
     if (!requireAuthForAction('restablecer la rutina')) return;
-    const nextRoutine = normalizeRoutine(getRoutine(selectedEquipment, intensity), routine);
+    const nextRoutine = normalizeRoutine(defaultRoutine, routine);
     setCustomRoutine(null);
     setEditorRoutine(nextRoutine);
     const resetProgress = createDefaultProgress(nextRoutine);
@@ -1079,6 +1171,7 @@ export default function App() {
       name: profile.name.trim(),
       email: profile.email.trim(),
       equipment: selectedEquipment,
+      dailyMinutes,
       updatedAt: new Date().toISOString(),
     };
     setProfile(nextProfile);
@@ -1414,18 +1507,41 @@ export default function App() {
               />
             </View>
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Nivel de entrenamiento</Text>
+              <Text style={styles.sectionTitle}>¿Cómo empiezas?</Text>
               <View style={styles.intensityRow}>
-                {(['Principiante', 'Intermedio', 'Avanzado'] as const).map((level) => (
+                {[
+                  ['Desde cero', 'Principiante'],
+                  ['Ya tengo conocimiento', 'Intermedio'],
+                ].map(([label, level]) => (
                   <Pressable
                     key={level}
-                    onPress={() => updateProfileField('level', level)}
+                    onPress={() => {
+                      updateProfileField('level', level);
+                      setIntensity(getRecommendedIntensity(level as UserProfile['level']));
+                    }}
                     style={[styles.intensityButton, profile.level === level && styles.intensityButtonActive]}
                   >
-                    <Text style={[styles.intensityText, profile.level === level && styles.intensityTextActive]}>{level}</Text>
+                    <Text style={[styles.intensityText, profile.level === level && styles.intensityTextActive]}>{label}</Text>
                   </Pressable>
                 ))}
               </View>
+              <Text style={styles.sectionTitle}>Tiempo diario disponible</Text>
+              <TextInput
+                value={String(dailyMinutes)}
+                onChangeText={(value) => {
+                  const nextMinutes = Number.parseInt(value.replace(/[^0-9]/g, ''), 10);
+                  setDailyMinutes(Number.isFinite(nextMinutes) ? Math.min(nextMinutes, 180) : 0);
+                }}
+                placeholder="Minutos por día"
+                placeholderTextColor="#5f8493"
+                keyboardType="number-pad"
+                style={styles.profileInput}
+              />
+              <Text style={styles.cardDescription}>
+                {dailyMinutes > 30
+                  ? `Tu plan semanal se actualiza al instante para ${dailyMinutes} minutos al día.`
+                  : 'Indica más de 30 minutos diarios para activar tu rutina semanal personalizada.'}
+              </Text>
               <Text style={styles.sectionTitle}>Equipo disponible</Text>
               <View style={styles.chipWrap}>
                 {equipmentList.map((item) => {
@@ -1691,17 +1807,17 @@ export default function App() {
         {activeScreen === 'modify' ? <>
         <AnimatedSection delay={0}>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Equipo disponible</Text>
+          <Text style={styles.sectionTitle}>Equipo para este borrador</Text>
           <Text style={styles.cardDescription}>
-            Rutina base inspirada en principios de ACSM: fuerza, volumen progresivo, equilibrio entre patrones y técnica segura. Ajusta las cargas a tu nivel y consulta a un profesional si tienes lesiones o condiciones médicas.
+            Estos requisitos pertenecen sólo a esta rutina. Podrás mostrarlos cuando la compartas; no cambian tu rutina default.
           </Text>
           <View style={styles.chipWrap}>
             {equipmentList.map((item) => {
-              const active = selectedEquipment.includes(item);
+              const active = draftEquipment.includes(item);
               return (
                 <AnimatedButton
                   key={item}
-                  onPress={() => toggleEquipment(item)}
+                  onPress={() => toggleDraftEquipment(item)}
                   style={[styles.chip, active && styles.chipActive]}
                 >
                   <Text style={[styles.chipText, active && styles.chipTextActive]}>{item}</Text>
@@ -1714,19 +1830,19 @@ export default function App() {
 
         <AnimatedSection delay={90}>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Intensidad</Text>
+          <Text style={styles.sectionTitle}>Intensidad del borrador</Text>
           <View style={styles.intensityRow}>
             {(['Baja', 'Media', 'Alta', 'Máxima'] as Intensity[]).map((level) => (
               <AnimatedButton
                 key={level}
-                onPress={() => setIntensity(level)}
-                style={[styles.intensityButton, level === intensity && styles.intensityButtonActive]}
+                onPress={() => setDraftIntensity(level)}
+                style={[styles.intensityButton, level === draftIntensity && styles.intensityButtonActive]}
               >
-                <Text style={[styles.intensityText, level === intensity && styles.intensityTextActive]}>{level}</Text>
+                <Text style={[styles.intensityText, level === draftIntensity && styles.intensityTextActive]}>{level}</Text>
               </AnimatedButton>
             ))}
           </View>
-          <Text style={styles.intensityDescription}>{intensityLabel[intensity]}</Text>
+          <Text style={styles.intensityDescription}>{intensityLabel[draftIntensity]}</Text>
         </View>
         </AnimatedSection>
 
@@ -1736,13 +1852,13 @@ export default function App() {
           <Text style={styles.cardDescription}>¿Qué rutina quieres modificar?</Text>
           <View style={styles.routineOptions}>
             <AnimatedButton
-              onPress={() => editSelectedRoutine('default', getRoutine(selectedEquipment, intensity))}
+              onPress={() => editSelectedRoutine('default', draftRoutine)}
               style={[styles.routineOption, selectedEditRoutineId === 'default' && styles.routineOptionActive]}
             >
               <Text style={[styles.routineOptionTitle, selectedEditRoutineId === 'default' && styles.routineOptionTitleActive]}>
                 Rutina default
               </Text>
-              <Text style={styles.routineOptionMeta}>Generada por FitFlow</Text>
+              <Text style={styles.routineOptionMeta}>Vista previa con este equipo e intensidad</Text>
             </AnimatedButton>
             {routineTemplates
               .filter((template) => template.ownerRole === 'user')
@@ -1784,23 +1900,17 @@ export default function App() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.progressText}>
-              {customRoutine ? 'Rutina personalizada' : 'Rutina default generada'}
+              {customRoutine ? 'Rutina personalizada activa' : 'Borrador sin activar'}
             </Text>
             <AnimatedButton onPress={openWeekEditor} style={styles.resetButton}>
               <Text style={styles.resetButtonText}>
-                {customRoutine ? 'Editar rutina' : 'Modificar default'}
+                {customRoutine ? 'Editar rutina' : 'Editar borrador'}
               </Text>
             </AnimatedButton>
           </View>
-          {customRoutine ? (
-            <AnimatedButton onPress={resetRoutineToDefault} style={styles.defaultButton}>
-              <Text style={styles.defaultButtonText}>Usar rutina default</Text>
-            </AnimatedButton>
-          ) : (
-            <AnimatedButton onPress={createCustomRoutine} style={styles.defaultButton}>
-              <Text style={styles.defaultButtonText}>Crear rutina propia</Text>
-            </AnimatedButton>
-          )}
+          <AnimatedButton onPress={createCustomRoutine} style={styles.defaultButton}>
+            <Text style={styles.defaultButtonText}>Crear rutina propia</Text>
+          </AnimatedButton>
         </View>
         </AnimatedSection>
 
@@ -1898,6 +2008,13 @@ export default function App() {
               <>
                 <Text style={styles.dayTitle}>{todayPlan.title}</Text>
                 <Text style={styles.progressText}>Completa los ejercicios y registra tus pesos.</Text>
+                {customRoutine ? (
+                  <AnimatedButton onPress={() => void resetRoutineToDefault()} style={styles.defaultButton}>
+                    <Text style={styles.defaultButtonText}>Usar rutina default del perfil</Text>
+                  </AnimatedButton>
+                ) : (
+                  <Text style={styles.cardDescription}>Estás usando la rutina default creada desde tu perfil.</Text>
+                )}
               </>
             ) : (
               <Text style={styles.emptyState}>No hay entrenamiento programado para hoy.</Text>

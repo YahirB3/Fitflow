@@ -11,6 +11,7 @@ export type UserProfile = {
   level?: 'Principiante' | 'Intermedio' | 'Avanzado';
   goals?: string[];
   equipment?: string[];
+  dailyMinutes?: number;
   createdAt: string;
   updatedAt: string;
 };

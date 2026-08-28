@@ -2003,24 +2003,32 @@ export default function App() {
         </View> : null}
       </ScrollView>
         {isGuest && authPromptVisible ? (
-          <View style={styles.authOverlayContainer}>
-            <Animated.View
-              style={[
-                styles.authFloatingPanel,
-                isCompactLayout && { width: Math.max(280, viewportWidth - 24) },
-                {
-                  borderColor: authGlow.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['#29434f', '#7ed8ff'],
-                  }),
-                  transform: [{ translateX: authShake.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] }) }],
-                  shadowOpacity: authGlow.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.42] }),
-                },
-              ]}
-            >
-              <Text style={styles.eyebrow}>MODO INVITADO</Text>
-              <Text style={styles.sectionTitle}>{authMode === 'register' ? 'Crear cuenta para editar' : 'Empezar ahora'}</Text>
-              {authPromptText ? <Text style={styles.cardDescription}>{authPromptText}</Text> : null}
+          <View style={styles.authOverlayBackdrop}>
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              onPress={() => {
+                setAuthPromptVisible(false);
+                setAuthMessage('');
+                setAuthPromptText('');
+              }}
+            />
+            <View style={styles.authOverlayContainer}>
+              <Animated.View
+                style={[
+                  styles.authFloatingPanel,
+                  isCompactLayout && { width: Math.max(280, viewportWidth - 24) },
+                  {
+                    borderColor: authGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['#29434f', '#7ed8ff'],
+                    }),
+                    transform: [{ translateX: authShake.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] }) }],
+                  },
+                ]}
+              >
+                <Text style={styles.eyebrow}>MODO INVITADO</Text>
+                <Text style={styles.sectionTitle}>{authMode === 'register' ? 'Crear cuenta para editar' : 'Empezar ahora'}</Text>
+                {authPromptText ? <Text style={styles.cardDescription}>{authPromptText}</Text> : null}
 
               {authMode === 'register' ? (
                 <TextInput
@@ -2095,8 +2103,9 @@ export default function App() {
                 </Text>
               </Pressable>
 
-              {authMessage ? <Text style={styles.assignmentMessage}>{authMessage}</Text> : null}
-            </Animated.View>
+                {authMessage ? <Text style={styles.assignmentMessage}>{authMessage}</Text> : null}
+              </Animated.View>
+            </View>
           </View>
         ) : null}
         {signOutConfirmVisible ? (
@@ -2373,11 +2382,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    shadowColor: '#7ed8ff',
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 16,
     elevation: 7,
     zIndex: 40,
+  },
+  authOverlayBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(4, 12, 17, 0.2)',
+    zIndex: 250,
+    elevation: 25,
   },
   authOverlayContainer: {
     position: 'absolute',

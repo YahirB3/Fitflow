@@ -394,21 +394,35 @@ const getTodayName = () => {
   return days[new Date().getDay()];
 };
 
-const createRoutineShareLink = (title: string, routine: RoutineDay[]) => {
+const createRoutineShareLink = (
+  title: string,
+  routine: RoutineDay[],
+  requirements?: { equipment?: string[]; intensity?: Intensity },
+) => {
   if (typeof window === 'undefined') return '';
-  const payload = encodeURIComponent(JSON.stringify({ title, routine }));
+  const payload = encodeURIComponent(JSON.stringify({ title, routine, ...requirements }));
   return `${window.location.origin}${window.location.pathname}?sharedRoutine=${payload}`;
 };
 
-const readSharedRoutineFromUrl = (): { title: string; routine: RoutineDay[] } | null => {
+const readSharedRoutineFromUrl = (): { title: string; routine: RoutineDay[]; equipment?: string[]; intensity?: Intensity } | null => {
   if (typeof window === 'undefined') return null;
   const encodedRoutine = new URLSearchParams(window.location.search).get('sharedRoutine');
   if (!encodedRoutine) return null;
 
   try {
-    const parsed = JSON.parse(decodeURIComponent(encodedRoutine)) as Partial<{ title: string; routine: RoutineDay[] }>;
+    const parsed = JSON.parse(decodeURIComponent(encodedRoutine)) as Partial<{
+      title: string;
+      routine: RoutineDay[];
+      equipment: string[];
+      intensity: Intensity;
+    }>;
     if (!parsed.title || !Array.isArray(parsed.routine) || parsed.routine.length === 0) return null;
-    return { title: parsed.title, routine: parsed.routine };
+    return {
+      title: parsed.title,
+      routine: parsed.routine,
+      equipment: Array.isArray(parsed.equipment) ? parsed.equipment : undefined,
+      intensity: parsed.intensity,
+    };
   } catch {
     return null;
   }
@@ -1074,7 +1088,10 @@ export default function App() {
       return;
     }
 
-    const template = await createRoutineTemplate(currentUserId, title, routine);
+    const template = await createRoutineTemplate(currentUserId, title, draftRoutine, 'trainer', {
+      equipment: draftEquipment,
+      intensity: draftIntensity,
+    });
     setRoutineTemplates((current) => [...current, template]);
     setRoutineAssignmentMessage(`Plantilla "${template.title}" guardada.`);
   };
@@ -1103,13 +1120,20 @@ export default function App() {
       return;
     }
 
-    const template = await createRoutineTemplate(currentUserId, title, routine, 'user');
+    const template = await createRoutineTemplate(currentUserId, title, draftRoutine, 'user', {
+      equipment: draftEquipment,
+      intensity: draftIntensity,
+    });
     setRoutineTemplates((current) => [...current, template]);
     setRoutineAssignmentMessage(`Tu rutina "${template.title}" quedó guardada.`);
   };
 
-  const shareRoutine = async (title: string, sharedRoutine: RoutineDay[]) => {
-    const link = createRoutineShareLink(title, sharedRoutine);
+  const shareRoutine = async (
+    title: string,
+    sharedRoutine: RoutineDay[],
+    requirements?: { equipment?: string[]; intensity?: Intensity },
+  ) => {
+    const link = createRoutineShareLink(title, sharedRoutine, requirements);
     if (!link) {
       setRoutineAssignmentMessage('Los enlaces compartidos están disponibles en la versión web.');
       return;
@@ -1657,12 +1681,22 @@ export default function App() {
                     <View style={styles.assignmentDetails}>
                       <Text style={styles.assignmentTrainer}>{template.title}</Text>
                       <Text style={styles.historyText}>{template.routine.length} días programados</Text>
+                      {template.equipment?.length ? (
+                        <Text style={styles.historyText}>Equipo: {template.equipment.join(', ')}</Text>
+                      ) : null}
+                      {template.intensity ? <Text style={styles.historyText}>Intensidad: {template.intensity}</Text> : null}
                     </View>
                     <View style={styles.assignmentActions}>
                       <Pressable onPress={() => void activateUserRoutine(template)} style={styles.acceptButton}>
                         <Text style={styles.actionButtonText}>Usar rutina</Text>
                       </Pressable>
-                      <Pressable onPress={() => void shareRoutine(template.title, template.routine)} style={styles.shareButton}>
+                      <Pressable
+                        onPress={() => void shareRoutine(template.title, template.routine, {
+                          equipment: template.equipment,
+                          intensity: template.intensity,
+                        })}
+                        style={styles.shareButton}
+                      >
                         <Text style={styles.actionButtonText}>Compartir</Text>
                       </Pressable>
                       <Pressable onPress={() => void deleteSavedRoutine(template.id)} style={styles.rejectButton}>

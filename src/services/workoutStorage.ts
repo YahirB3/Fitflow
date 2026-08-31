@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { ExerciseProgress, RoutineDay, WeeklySummary } from '../types/workout';
+import type { ExerciseProgress, Intensity, RoutineDay, WeeklySummary } from '../types/workout';
 import type {
   AssignmentStatus,
   RoutineAssignment,
@@ -227,6 +227,7 @@ export const createRoutineTemplate = async (
   title: string,
   routine: RoutineDay[],
   ownerRole: RoutineOwnerRole = 'trainer',
+  requirements?: { equipment: string[]; intensity: Intensity },
 ): Promise<RoutineTemplate> => {
   const templates = await loadRoutineTemplates();
   const now = new Date().toISOString();
@@ -236,6 +237,8 @@ export const createRoutineTemplate = async (
     ownerRole,
     title,
     routine: JSON.parse(JSON.stringify(routine)) as RoutineDay[],
+    equipment: requirements?.equipment,
+    intensity: requirements?.intensity,
     createdAt: now,
     updatedAt: now,
   };

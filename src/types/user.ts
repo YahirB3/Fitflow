@@ -48,6 +48,8 @@ export type RoutineTemplate = {
   ownerRole: RoutineOwnerRole;
   title: string;
   routine: import('./workout').RoutineDay[];
+  equipment?: string[];
+  intensity?: import('./workout').Intensity;
   createdAt: string;
   updatedAt: string;
 };

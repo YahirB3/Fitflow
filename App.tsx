@@ -281,6 +281,30 @@ const mergeProgressWithRoutine = (existing: Record<string, ExerciseProgress>, ro
 const countCompletedExercises = (progress: Record<string, ExerciseProgress>) =>
   Object.values(progress).filter((item) => item.done).length;
 
+const routinesMatch = (first: RoutineDay[], second: RoutineDay[]) =>
+  JSON.stringify(first) === JSON.stringify(second);
+
+const getFirebaseErrorMessage = (error: unknown, fallback: string) => {
+  const code = String((error as { code?: string } | undefined)?.code ?? '');
+  if (code.includes('unavailable') || code.includes('network-request-failed')) {
+    return 'No hay conexión con Firebase. Los cambios se intentarán guardar cuando vuelvas a conectarte.';
+  }
+  if (code.includes('permission-denied')) {
+    return 'Firebase rechazó esta acción. Inicia sesión de nuevo e inténtalo.';
+  }
+  return fallback;
+};
+
+const getGoogleAuthErrorMessage = (error: unknown) => {
+  const code = String((error as { code?: string } | undefined)?.code ?? '');
+  if (code.includes('popup-closed-by-user')) return 'Cerraste la ventana de Google antes de terminar el inicio de sesión.';
+  if (code.includes('popup-blocked')) return 'El navegador bloqueó la ventana de Google. Permite ventanas emergentes e inténtalo de nuevo.';
+  if (code.includes('unauthorized-domain')) return 'Este dominio no está autorizado en Firebase. Agrega localhost a Dominios autorizados.';
+  if (code.includes('operation-not-allowed')) return 'Google no está habilitado como proveedor en Firebase Authentication.';
+  if (code.includes('network-request-failed')) return 'No se pudo conectar con Google. Revisa tu conexión e inténtalo de nuevo.';
+  return 'No se pudo iniciar sesión con Google. Revisa la configuración de Firebase Authentication.';
+};
+
 type AppScreen = 'modify' | 'today' | 'routines' | 'trainer' | 'trainerPanel' | 'profile';
 type AuthMode = 'login' | 'register';
 
@@ -457,6 +481,7 @@ export default function App() {
   const [selectedEditRoutineId, setSelectedEditRoutineId] = useState('default');
   const [profile, setProfile] = useState<UserProfile>(() => createEmptyProfile());
   const [profileMessage, setProfileMessage] = useState('');
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [signOutConfirmVisible, setSignOutConfirmVisible] = useState(false);
   const [isEditingWeek, setIsEditingWeek] = useState(false);
   const [editorRoutine, setEditorRoutine] = useState<RoutineDay[]>(() =>
@@ -564,10 +589,13 @@ export default function App() {
 
     if (!sessionUser) {
       setProfile(createEmptyProfile());
+      setProfileLoaded(false);
       return () => {
         isCurrentSession = false;
       };
     }
+
+    setProfileLoaded(false);
 
     setProfile((current) => ({
       ...current,
@@ -578,16 +606,24 @@ export default function App() {
     }));
 
     const loadProfile = async () => {
-      const savedProfile = await loadUserProfile();
-      if (isCurrentSession && savedProfile) {
-        setProfile(savedProfile);
-        if (typeof savedProfile.dailyMinutes === 'number') {
-          setDailyMinutes(savedProfile.dailyMinutes);
+      try {
+        const savedProfile = await loadUserProfile();
+        if (isCurrentSession && savedProfile) {
+          setProfile(savedProfile);
+          if (typeof savedProfile.dailyMinutes === 'number') {
+            setDailyMinutes(savedProfile.dailyMinutes);
+          }
+          if (Array.isArray(savedProfile.equipment)) {
+            setSelectedEquipment(savedProfile.equipment.filter((item): item is EquipmentName => equipmentList.includes(item as EquipmentName)));
+          }
+          setIntensity(getRecommendedIntensity(savedProfile.level));
         }
-        if (Array.isArray(savedProfile.equipment)) {
-          setSelectedEquipment(savedProfile.equipment.filter((item): item is EquipmentName => equipmentList.includes(item as EquipmentName)));
+      } catch (error) {
+        if (isCurrentSession) {
+          setProfileMessage(getFirebaseErrorMessage(error, 'No se pudo cargar tu perfil de Firebase. Inténtalo de nuevo.'));
         }
-        setIntensity(getRecommendedIntensity(savedProfile.level));
+      } finally {
+        if (isCurrentSession) setProfileLoaded(true);
       }
     };
 
@@ -618,8 +654,8 @@ export default function App() {
           await loginWithGoogleIdToken(idToken);
           setAuthPromptVisible(false);
           setAuthPromptText('');
-        } catch {
-          setAuthMessage('No se pudo iniciar con Google. Intenta de nuevo.');
+        } catch (error) {
+          setAuthMessage(getGoogleAuthErrorMessage(error));
         } finally {
           setGoogleAuthLoading(false);
         }
@@ -771,6 +807,32 @@ export default function App() {
       setWeekProgress((current) => mergeProgressWithRoutine(current, defaultRoutine));
     }
   }, [customRoutine, defaultRoutine]);
+
+  useEffect(() => {
+    if (!sessionUser || !profileLoaded) return;
+
+    const profileToSave: UserProfile = {
+      ...profile,
+      id: sessionUser.uid,
+      equipment: selectedEquipment,
+      dailyMinutes,
+      updatedAt: new Date().toISOString(),
+    };
+    const saveTimer = setTimeout(() => {
+      const saveProfileChanges = async () => {
+        try {
+          setProfileMessage('Guardando cambios...');
+          await saveUserProfile(profileToSave);
+          setProfileMessage('Cambios guardados automáticamente.');
+        } catch (error) {
+          setProfileMessage(getFirebaseErrorMessage(error, 'No se pudieron guardar los cambios en Firebase. Inténtalo de nuevo.'));
+        }
+      };
+      void saveProfileChanges();
+    }, 650);
+
+    return () => clearTimeout(saveTimer);
+  }, [dailyMinutes, profile, profileLoaded, selectedEquipment, sessionUser]);
 
   useEffect(() => {
     const saveHistory = async () => {
@@ -1199,8 +1261,12 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     };
     setProfile(nextProfile);
-    await saveUserProfile(nextProfile);
-    setProfileMessage('Perfil guardado correctamente.');
+    try {
+      await saveUserProfile(nextProfile);
+      setProfileMessage('Perfil guardado correctamente.');
+    } catch (error) {
+      setProfileMessage(getFirebaseErrorMessage(error, 'No se pudo guardar el perfil. Inténtalo de nuevo.'));
+    }
   };
 
   const submitAuth = async () => {
@@ -1298,8 +1364,8 @@ export default function App() {
       } else {
         await promptGoogleAuth();
       }
-    } catch {
-      setAuthMessage('No se pudo iniciar con Google. Verifica la configuración.');
+    } catch (error) {
+      setAuthMessage(getGoogleAuthErrorMessage(error));
     } finally {
       if (Platform.OS === 'web') {
         setGoogleAuthLoading(false);
@@ -1579,7 +1645,7 @@ export default function App() {
               </View>
               <View style={styles.profileActions}>
                 <Pressable onPress={() => void saveProfile()} style={[styles.primaryButton, styles.profileActionButton]}>
-                  <Text style={styles.primaryButtonText}>Guardar perfil</Text>
+                  <Text style={styles.primaryButtonText}>Guardar ahora</Text>
                 </Pressable>
                 {sessionUser ? (
                   <Pressable onPress={confirmSignOut} style={[styles.secondaryButton, styles.profileActionButton, styles.signOutButton]}>
@@ -1669,27 +1735,32 @@ export default function App() {
               style={styles.trainerCodeInput}
             />
             <Pressable onPress={() => void saveCurrentRoutineAsUserTemplate()} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Guardar rutina actual</Text>
+              <Text style={styles.primaryButtonText}>Guardar borrador</Text>
             </Pressable>
             {routineTemplates.filter((template) => template.ownerRole === 'user').length === 0 ? (
               <Text style={styles.emptyState}>Todavía no tienes rutinas guardadas.</Text>
             ) : (
               routineTemplates
                 .filter((template) => template.ownerRole === 'user')
-                .map((template) => (
+                .map((template) => {
+                  const isActive = Boolean(customRoutine && routinesMatch(template.routine, routine));
+                  return (
                   <View key={template.id} style={styles.templateItem}>
                     <View style={styles.assignmentDetails}>
                       <Text style={styles.assignmentTrainer}>{template.title}</Text>
                       <Text style={styles.historyText}>{template.routine.length} días programados</Text>
+                      {isActive ? <Text style={styles.assignmentStatus}>Rutina activa</Text> : null}
                       {template.equipment?.length ? (
                         <Text style={styles.historyText}>Equipo: {template.equipment.join(', ')}</Text>
                       ) : null}
                       {template.intensity ? <Text style={styles.historyText}>Intensidad: {template.intensity}</Text> : null}
                     </View>
                     <View style={styles.assignmentActions}>
-                      <Pressable onPress={() => void activateUserRoutine(template)} style={styles.acceptButton}>
-                        <Text style={styles.actionButtonText}>Usar rutina</Text>
-                      </Pressable>
+                      {!isActive ? (
+                        <Pressable onPress={() => void activateUserRoutine(template)} style={styles.acceptButton}>
+                          <Text style={styles.actionButtonText}>Usar rutina</Text>
+                        </Pressable>
+                      ) : null}
                       <Pressable
                         onPress={() => void shareRoutine(template.title, template.routine, {
                           equipment: template.equipment,
@@ -1704,7 +1775,8 @@ export default function App() {
                       </Pressable>
                     </View>
                   </View>
-                ))
+                  );
+                })
             )}
             <Text style={styles.sectionTitle}>Rutinas de mis coaches</Text>
             {routineAssignments.filter((assignment) => assignment.clientId === currentUserId).length === 0 ? (

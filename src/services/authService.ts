@@ -71,6 +71,7 @@ export const resetUserPassword = async (email: string): Promise<void> => {
 
 export const loginWithGoogleWeb = async (): Promise<User> => {
   const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   const userCredential = await signInWithPopup(auth, provider);
   await ensureUserProfile(userCredential.user);
   return userCredential.user;

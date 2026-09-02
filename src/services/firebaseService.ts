@@ -59,6 +59,7 @@ export const saveUserProfile = async (profile: UserProfile): Promise<void> => {
     );
   } catch (error) {
     console.error('Error saving user profile:', error);
+    throw error;
   }
 };
 
